@@ -28,6 +28,7 @@ export class Controller {
   private middleDrag = false;
   private lastMouse = { x: 0, y: 0 };
   private edge = { x: 0, y: 0 };
+  private lastClick = { time: 0, kind: '' };
 
   constructor(world: World, renderer: Renderer, hud: HudPort) {
     this.world = world;
@@ -204,6 +205,22 @@ export class Controller {
   private clickSelect(sx: number, sy: number, add: boolean): void {
     const id = this.pickOwnUnit(sx, sy);
     if (id !== null) {
+      const unit = this.world.unitById.get(id);
+      // double click on a unit: grab every unit of the same kind on screen
+      const now = performance.now();
+      if (unit && this.lastClick.kind === unit.kind && now - this.lastClick.time < 350) {
+        this.selection.clear();
+        for (const o of this.world.units) {
+          if (o.owner !== 0 || o.kind !== unit.kind) continue;
+          const p = this.unitScreen(o);
+          if (p.x >= 0 && p.x <= this.renderer.screenW && p.y >= 0 && p.y <= this.renderer.screenH) {
+            this.selection.add(o.id);
+          }
+        }
+        this.lastClick.time = 0;
+        return;
+      }
+      this.lastClick = { time: now, kind: unit?.kind ?? '' };
       if (!add) this.selection.clear();
       this.selection.add(id);
       this.selectedBuilding = null;
