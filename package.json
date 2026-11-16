@@ -1,0 +1,19 @@
+{
+  "name": "red-echo-rts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Warring States prototype: browser isometric RTS",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "simtest": "node dist/scripts/simtest.js",
+    "serve": "node server.mjs"
+  },
+  "dependencies": {
+    "pixi.js": "^8.6.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
