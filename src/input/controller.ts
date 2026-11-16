@@ -29,6 +29,7 @@ export class Controller {
   private lastMouse = { x: 0, y: 0 };
   private edge = { x: 0, y: 0 };
   private lastClick = { time: 0, kind: '' };
+  private spaceDown = false;
 
   constructor(world: World, renderer: Renderer, hud: HudPort) {
     this.world = world;
@@ -52,7 +53,9 @@ export class Controller {
       }
       const p = { x: e.offsetX, y: e.offsetY };
       this.lastMouse = p;
-      if (e.button === 1) {
+      // 中键，或按住空格 + 左键 = 拖动地图
+      if (e.button === 1 || (e.button === 0 && this.spaceDown)) {
+        e.preventDefault();
         this.middleDrag = true;
         this.dragStart = p;
         return;
@@ -73,9 +76,6 @@ export class Controller {
     c.addEventListener('pointermove', (e) => {
       const p = { x: e.offsetX, y: e.offsetY };
       this.lastMouse = p;
-      const r = c.getBoundingClientRect();
-      this.edge.x = p.x < 24 ? -1 : p.x > r.width - 24 ? 1 : 0;
-      this.edge.y = p.y < 24 ? -1 : p.y > r.height - 24 ? 1 : 0;
 
       if (this.middleDrag) {
         this.renderer.panScreen(this.dragStart.x - p.x, this.dragStart.y - p.y);
@@ -88,7 +88,7 @@ export class Controller {
 
     c.addEventListener('pointerup', (e) => {
       const p = { x: e.offsetX, y: e.offsetY };
-      if (e.button === 1) {
+      if (this.middleDrag) {
         this.middleDrag = false;
         return;
       }
@@ -102,6 +102,15 @@ export class Controller {
         this.clickSelect(p.x, p.y, e.shiftKey);
       }
       this.hud.refresh();
+    });
+
+    // 鼠标推到窗口边缘就滚屏 —— 绑定在 window 上，鼠标压在 HUD 上时也生效
+    window.addEventListener('mousemove', (e) => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const M = 44;
+      this.edge.x = e.clientX < M ? -1 : e.clientX > w - M ? 1 : 0;
+      this.edge.y = e.clientY < M ? -1 : e.clientY > h - M ? 1 : 0;
     });
 
     c.addEventListener('pointerleave', () => {
@@ -123,6 +132,11 @@ export class Controller {
 
     window.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
+      if (k === ' ') {
+        this.spaceDown = true;
+        e.preventDefault();
+        return;
+      }
       this.keys.add(k);
       if (k === 'escape') {
         this.placing = null;
@@ -148,8 +162,17 @@ export class Controller {
         }
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      if (k === ' ') this.spaceDown = false;
+      this.keys.delete(k);
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.spaceDown = false;
+      this.middleDrag = false;
+      this.dragging = false;
+    });
   }
 
   /** Screen-space rectangle while the player is dragging a selection box. */
@@ -163,14 +186,13 @@ export class Controller {
   update(dt: number): void {
     let dx = 0;
     let dy = 0;
-    const speed = 900 * dt;
+    const speed = 1200 * dt;
     if (this.keys.has('w') || this.keys.has('arrowup')) dy -= speed;
     if (this.keys.has('s') || this.keys.has('arrowdown')) dy += speed;
-    if (this.keys.has('a') && false) dx -= speed; // 'a' is attack-move, not pan
     if (this.keys.has('d') || this.keys.has('arrowright')) dx += speed;
     if (this.keys.has('arrowleft')) dx -= speed;
-    dx += this.edge.x * speed * 0.7;
-    dy += this.edge.y * speed * 0.7;
+    dx += this.edge.x * speed * 1.15;
+    dy += this.edge.y * speed * 1.15;
     if (dx !== 0 || dy !== 0) this.renderer.panScreen(-dx, -dy);
   }
 
@@ -406,16 +428,16 @@ export class Controller {
       const tx = Math.round(u.x - def.w / 2);
       const ty = Math.round(u.y - def.h / 2);
       if (!this.world.map.blockRectFree(tx, ty, def.w, def.h)) {
-        this.hud.toast('这里太窄展不开，开到开阔地再展开');
+        this.hud.toast('这里太窄立不了旗，换个开阔地');
         return;
       }
       this.world.enqueue({ c: 'deploy', ids: [id] });
       this.selection.delete(id);
       this.hud.refresh();
-      this.hud.toast('基地车展开中…');
+      this.hud.toast('立旗扎营…');
       return;
     }
-    this.hud.toast('先选中一辆基地车');
+    this.hud.toast('先选中军旗');
   }
 
   setGameOver(win: boolean): void {

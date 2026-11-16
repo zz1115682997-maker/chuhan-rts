@@ -66,13 +66,13 @@ function drawUnit(kind: UnitKind, owner: number): Container {
 
   switch (kind) {
     case 'mcv': {
-      // 基地车：方头卡车 + 折叠吊臂
-      g.roundRect(-19, -15, 38, 21, 4).fill(0x6f7a58).stroke({ width: 2, color: INK });
-      g.roundRect(2, -19, 17, 12, 3).fill(col).stroke({ width: 2, color: INK });
-      g.moveTo(-10, -15).lineTo(-10, -33).lineTo(4, -26).stroke({ width: 3, color: 0xc8a24a });
-      g.circle(-12, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
-      g.circle(-2, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
-      g.circle(11, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
+      // 军旗：旗杆 + 飘扬的旗面 + 土台
+      g.ellipse(0, 8, 15, 6).fill({ color: 0x2a1f14, alpha: 0.45 });
+      g.roundRect(-9, 2, 18, 7, 3).fill(0x6b5a3f).stroke({ width: 1.5, color: INK });
+      g.moveTo(0, 6).lineTo(0, -40).stroke({ width: 3, color: 0x8a6f45 });
+      g.poly([0, -40, 24, -35, 20, -26, 0, -21]).fill(col).stroke({ width: 2, color: INK });
+      g.poly([6, -36, 17, -33, 15, -28, 6, -25]).fill({ color: light, alpha: 0.85 });
+      g.circle(0, -40, 4).fill(0xc8a24a).stroke({ width: 1.5, color: INK });
       break;
     }
     case 'han_zu':
@@ -171,8 +171,8 @@ function drawIcon(kind: UnitKind, owner: number): Container {
   g.circle(0, 0, 22).fill({ color: col, alpha: 0.18 }).stroke({ width: 2, color: col });
   switch (kind) {
     case 'mcv':
-      g.roundRect(-14, -10, 28, 20, 3).fill(0x6f7a58).stroke({ width: 2, color: INK });
-      g.roundRect(0, -16, 13, 10, 2).fill(col).stroke({ width: 2, color: INK });
+      g.moveTo(0, 8).lineTo(0, -14).stroke({ width: 2.5, color: 0x8a6f45 });
+      g.poly([0, -14, 13, -11, 11, -5, 0, -2]).fill(col).stroke({ width: 1.5, color: INK });
       break;
     case 'han_zu':
     case 'chu_zidi':

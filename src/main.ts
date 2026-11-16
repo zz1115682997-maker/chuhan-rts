@@ -40,7 +40,7 @@ async function boot(): Promise<void> {
   else renderer.centerOn(10, 10);
   renderer.applyCamera();
   hud.refresh();
-  hud.toast('选中基地车 → 开到合适位置 → 按 F 展开成大营');
+  hud.toast('选中军旗 → 开到想建营的位置 → 按 F 立旗扎营');
 
   const bootEl = document.getElementById('boot');
   if (bootEl) bootEl.remove();

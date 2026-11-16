@@ -64,12 +64,28 @@ export class Hud implements HudPort {
     const ctx = this.minimap.getContext('2d');
     if (!ctx) throw new Error('minimap context failed');
     this.mmCtx = ctx;
-    this.minimap.addEventListener('pointerdown', (e) => {
+    let mmDrag = false;
+    const jump = (e: PointerEvent): void => {
       if (!this.renderer) return;
       const r = this.minimap.getBoundingClientRect();
       const tx = ((e.clientX - r.left) / r.width) * this.world.map.size;
       const ty = ((e.clientY - r.top) / r.height) * this.world.map.size;
       this.renderer.centerOn(tx, ty);
+    };
+    this.minimap.addEventListener('pointerdown', (e) => {
+      mmDrag = true;
+      try {
+        this.minimap.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      jump(e);
+    });
+    this.minimap.addEventListener('pointermove', (e) => {
+      if (mmDrag) jump(e);
+    });
+    this.minimap.addEventListener('pointerup', () => {
+      mmDrag = false;
     });
     this.queueEl = el('div', 'queues', right);
 
@@ -91,8 +107,8 @@ export class Hud implements HudPort {
     this.placeBtn.addEventListener('click', () => this.ctrl?.startPlacing());
 
     this.deployBtn = el('button', 'btn deploy', buildRow);
-    this.deployBtn.innerHTML = '<span class="nm">展开基地车</span><span class="cost">F</span>';
-    this.deployBtn.title = '选中基地车后按 F 展开成大营';
+    this.deployBtn.innerHTML = '<span class="nm">立旗扎营</span><span class="cost">F</span>';
+    this.deployBtn.title = '选中军旗后按 F，就地立旗建营';
     this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
 
     const unitCol = el('div', 'col', bottom);
@@ -214,7 +230,7 @@ export class Hud implements HudPort {
     }
     const sel = [...ctrl.selection];
     if (sel.length === 0) {
-      this.infoEl.innerHTML = '<span class="dim">左键框选单位 · 右键移动/攻击 · WASD 平移 · 滚轮缩放</span>';
+      this.infoEl.innerHTML = '<span class="dim">左键框选 · 右键下令 · 中键或空格+左键拖动地图 · 鼠标推边滚屏 · 小地图可拖动</span>';
       return;
     }
     const counts = new Map<string, number>();
