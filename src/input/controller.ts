@@ -150,6 +150,12 @@ export class Controller {
     window.addEventListener('blur', () => this.keys.clear());
   }
 
+  /** Screen-space rectangle while the player is dragging a selection box. */
+  getMarquee(): { x0: number; y0: number; x1: number; y1: number } | null {
+    if (!this.dragging) return null;
+    return { x0: this.dragStart.x, y0: this.dragStart.y, x1: this.dragNow.x, y1: this.dragNow.y };
+  }
+
   // ------------------------------------------------------------- camera
 
   update(dt: number): void {

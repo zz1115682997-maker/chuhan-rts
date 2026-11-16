@@ -4,6 +4,7 @@ import { DT, World } from './sim/world.js';
 import { Renderer } from './render/renderer.js';
 import { Controller } from './input/controller.js';
 import { Hud } from './ui/hud.js';
+import { showMenu } from './ui/menu.js';
 
 const pageErrors: string[] = [];
 if (typeof window !== 'undefined') {
@@ -15,7 +16,18 @@ async function boot(): Promise<void> {
   const host = document.getElementById('game');
   if (!host) throw new Error('#game host missing');
 
-  const world = new World(20261116, 'han', 'chu');
+  const params = new URLSearchParams(location.search);
+  const auto = params.has('auto');
+  const setup = auto
+    ? {
+        playerFaction: (params.get('faction') === 'chu' ? 'chu' : 'han') as 'han' | 'chu',
+        aiFaction: (params.get('faction') === 'chu' ? 'han' : 'chu') as 'han' | 'chu',
+        mapKind: (params.get('map') ?? 'plains') as 'plains' | 'river' | 'mountain' | 'islands',
+        seed: 1108,
+      }
+    : await showMenu();
+
+  const world = new World(setup.seed, setup.playerFaction, setup.aiFaction, setup.mapKind);
   world.attachAi(new AIController(1));
 
   const renderer = await Renderer.create(host, world);
@@ -56,6 +68,8 @@ async function boot(): Promise<void> {
 
     renderer.pushEvents();
     renderer.selection = ctrl.selection;
+    renderer.selectionBuilding = ctrl.selectedBuilding;
+    renderer.marquee = ctrl.getMarquee();
     renderer.draw(dt);
     hud.tick();
 

@@ -2,7 +2,7 @@
 // Everything in here is pure data + integer/float math so it can run headless.
 
 import { generateMap, PLAYER_BASE, AI_BASE } from './map.js';
-import type { GameMap } from './map.js';
+import type { GameMap, MapKind } from './map.js';
 import { findPath, lineOfSight } from './path.js';
 import { Rng } from './rng.js';
 import {
@@ -39,8 +39,13 @@ export class World {
   private scratch: Unit[] = [];
   private ai: AiHook | null = null;
 
-  constructor(seed: number, playerFaction: Faction = 'han', aiFaction: Faction = 'chu') {
-    this.map = generateMap(seed);
+  constructor(
+    seed: number,
+    playerFaction: Faction = 'han',
+    aiFaction: Faction = 'chu',
+    mapKind: MapKind = 'plains'
+  ) {
+    this.map = generateMap(mapKind, seed);
     this.rng = new Rng(seed ^ 0x5f3759df);
     this.players = [
       this.makePlayer(0, playerFaction),
@@ -710,13 +715,21 @@ export class World {
             a.x += 0.01;
             continue;
           }
-          const push = (min - d) * 0.5;
+          // mass-weighted shove: a heavy cart nudges light infantry instead of
+          // carrying them along, and the push is capped per tick so it looks like
+          // units giving way rather than a physics explosion.
+          const ma = ra * ra;
+          const mb = rb * rb;
+          const total = ma + mb;
+          const overlap = min - d;
+          const pushA = Math.min(overlap * (mb / total), 0.022);
+          const pushB = Math.min(overlap * (ma / total), 0.022);
           dx /= d;
           dy /= d;
-          a.x -= dx * push;
-          a.y -= dy * push;
-          b.x += dx * push;
-          b.y += dy * push;
+          a.x -= dx * pushA;
+          a.y -= dy * pushA;
+          b.x += dx * pushB;
+          b.y += dy * pushB;
         }
       }
       const tx = Math.floor(a.x);

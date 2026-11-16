@@ -2,7 +2,7 @@
 
 import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { T_DIRT, T_GRASS, T_ROCK, T_WATER } from '../sim/map.js';
-import { BUILDING_DEFS } from '../sim/stats.js';
+import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { World } from '../sim/world.js';
 import { isoX, isoY, screenToTile, tileDiamond, TILE_H, TILE_W } from './iso.js';
 import type { TileCoord } from './iso.js';
@@ -26,12 +26,15 @@ export class Renderer {
   zoom = 1.0;
   cam: TileCoord = { x: 24, y: 24 };
   selection: Set<number> = new Set();
+  selectionBuilding: number | null = null;
+  marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
   ghost: { tx: number; ty: number; w: number; h: number; ok: boolean } | null = null;
 
   private terrain = new Container();
   private entities = new Container();
   private labels = new Container();
   private overlay = new Graphics();
+  private screenOverlay = new Graphics();
   private unitSprites = new Map<number, Sprite>();
   private buildingSprites = new Map<number, Sprite>();
   private buildingLabels = new Map<number, Text>();
@@ -60,7 +63,7 @@ export class Renderer {
     this.world = new Container();
     this.entities.sortableChildren = true;
     this.world.addChild(this.terrain, this.entities, this.labels, this.overlay);
-    app.stage.addChild(this.world);
+    app.stage.addChild(this.world, this.screenOverlay);
 
     this.buildTerrain();
     this.cam = { x: 24, y: 24 };
@@ -213,7 +216,23 @@ export class Renderer {
     this.syncUnits();
     this.syncBuildings();
     this.drawOverlay();
+    this.drawMarquee();
     this.updateEffects(dt);
+  }
+
+  private drawMarquee(): void {
+    const g = this.screenOverlay;
+    g.clear();
+    const mq = this.marquee;
+    if (!mq) return;
+    const x0 = Math.min(mq.x0, mq.x1);
+    const x1 = Math.max(mq.x0, mq.x1);
+    const y0 = Math.min(mq.y0, mq.y1);
+    const y1 = Math.max(mq.y0, mq.y1);
+    if (x1 - x0 < 3 && y1 - y0 < 3) return;
+    g.rect(x0, y0, x1 - x0, y1 - y0)
+      .fill({ color: 0x8ef7a8, alpha: 0.1 })
+      .stroke({ width: 1.5, color: 0xa6ffc0, alpha: 0.95 });
   }
 
   private syncUnits(): void {
@@ -319,9 +338,26 @@ export class Renderer {
       const u = this.sim.unitById.get(id);
       if (!u || !u.alive) continue;
       const cx = isoX(u.x, u.y);
-      const cy = isoY(u.x, u.y);
-      g.ellipse(cx, cy + 3, 16, 8).fill({ color: 0x7ef2a0, alpha: 0.16 });
-      g.ellipse(cx, cy + 3, 16, 8).stroke({ width: 2, color: 0x7ef2a0, alpha: 0.95 });
+      const cy = isoY(u.x, u.y) + 2;
+      const r = Math.max(13, UNIT_DEFS[u.kind].radius * 46);
+      g.ellipse(cx, cy, r, r * 0.52).fill({ color: 0x8ef7a8, alpha: 0.16 });
+      g.ellipse(cx, cy, r, r * 0.52).stroke({ width: 2.4, color: 0xa6ffc0, alpha: 1 });
+      // little marker so it stays readable when units overlap
+      g.rect(cx - 1.5, cy - r * 0.52 - 13, 3, 8).fill({ color: 0xa6ffc0, alpha: 0.95 });
+    }
+
+    // selected building outline
+    if (this.selectionBuilding !== null) {
+      const b = this.sim.buildingById.get(this.selectionBuilding);
+      if (b) {
+        const quad: number[] = [];
+        const corners: Array<[number, number]> = [
+          [b.tx, b.ty], [b.tx + b.w, b.ty], [b.tx + b.w, b.ty + b.h], [b.tx, b.ty + b.h],
+        ];
+        for (const [cx, cy] of corners) quad.push(isoX(cx, cy), isoY(cx, cy));
+        g.poly(quad).fill({ color: 0x8ef7a8, alpha: 0.1 });
+        g.poly(quad).stroke({ width: 2.5, color: 0xa6ffc0, alpha: 0.95 });
+      }
     }
 
     // health bars

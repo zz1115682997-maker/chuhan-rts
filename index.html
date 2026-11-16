@@ -88,6 +88,53 @@
         border-radius: 5px; cursor: pointer; font-size: 15px; font-family: inherit;
       }
 
+      /* ---------- 开局界面 ---------- */
+      #menu {
+        position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at 50% 38%, #17251b 0%, #070b08 72%);
+        color: #ece2cd; transition: opacity .22s ease;
+      }
+      #menu.leaving { opacity: 0; pointer-events: none; }
+      .menu-inner { width: min(1080px, 94vw); text-align: center; }
+      .menu-title {
+        font-size: 46px; letter-spacing: 16px; color: #e8c46a; font-weight: 700;
+        text-shadow: 0 2px 24px rgba(232,196,106,.25);
+      }
+      .menu-sub { margin-top: 10px; color: #8fa08f; letter-spacing: 6px; font-size: 13px; }
+      .menu-grid { display: flex; gap: 44px; margin-top: 34px; justify-content: center; align-items: flex-start; }
+      .menu-sec { flex: 1; min-width: 0; }
+      .menu-h { font-size: 13px; color: #8fa08f; letter-spacing: 4px; margin-bottom: 12px; }
+      .menu-cards { display: flex; gap: 12px; justify-content: center; }
+      .menu-cards.map-cards { flex-wrap: wrap; }
+      .mcard {
+        background: linear-gradient(180deg, rgba(30,42,32,.9), rgba(18,26,20,.95));
+        border: 1px solid #3d513f; border-radius: 8px; padding: 14px 16px; cursor: pointer;
+        transition: .15s; min-width: 132px;
+      }
+      .mcard:hover { border-color: #7fa869; transform: translateY(-2px); }
+      .mcard.active {
+        border-color: #e8c46a;
+        box-shadow: 0 0 0 1px #e8c46a inset, 0 6px 22px rgba(232,196,106,.18);
+        background: linear-gradient(180deg, rgba(58,48,24,.92), rgba(24,28,20,.95));
+      }
+      .mcard-title { font-size: 26px; letter-spacing: 6px; color: #ece2cd; }
+      .mcard-title.small { font-size: 15px; letter-spacing: 3px; margin-top: 8px; }
+      .mcard-tag { margin-top: 6px; font-size: 12px; color: #9db193; line-height: 1.5; max-width: 150px; }
+      .mcard-units { margin-top: 8px; font-size: 11px; color: #c8a24a; }
+      .thumb {
+        display: block; width: 132px; height: 132px; border-radius: 4px;
+        border: 1px solid #2c3a2d; image-rendering: pixelated;
+      }
+      .menu-hint { margin-top: 16px; font-size: 13px; color: #a9b8a0; line-height: 1.7; min-height: 46px; }
+      .menu-start {
+        margin-top: 30px; padding: 14px 64px; font-size: 19px; font-family: inherit; letter-spacing: 8px;
+        color: #1a1408; background: linear-gradient(180deg, #f0d18a, #c8a24a); border: none;
+        border-radius: 6px; cursor: pointer; font-weight: 700;
+        box-shadow: 0 8px 26px rgba(200,162,74,.28);
+      }
+      .menu-start:hover { filter: brightness(1.08); }
+
       #boot {
         position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
         background: #0b0f0c; color: #8fa08f; font-size: 16px; z-index: 50; letter-spacing: 2px;
