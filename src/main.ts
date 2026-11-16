@@ -97,7 +97,7 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
   const pump = (n = 3): void => {
     for (let i = 0; i < n; i++) world.step();
   };
-  const send = (type: string, x: number, y: number, button = 0, buttons = 1): void => {
+  const send = (type: string, x: number, y: number, button = 0, buttons = 1, shift = false): void => {
     const r = rect();
     canvas.dispatchEvent(
       new PointerEvent(type, {
@@ -105,6 +105,7 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
         clientY: r.top + y,
         button,
         buttons,
+        shiftKey: shift,
         pointerId: 1,
         pointerType: 'mouse',
         bubbles: true,
@@ -150,12 +151,23 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
     push(`box-select:${ctrl.selection.size >= 2 ? 'OK(' + ctrl.selection.size + ')' : 'FAIL(' + ctrl.selection.size + ')'}`);
 
     const target = renderer.tileToScreen(unit.x + 6, unit.y + 4);
-    send('pointerdown', target.x, target.y, 2, 2);
+    send('pointerdown', target.x, target.y);
+    send('pointerup', target.x, target.y);
     pump(3);
     const moving = [...ctrl.selection]
       .map((id) => world.unitById.get(id))
       .filter((u) => u && (u.order === 'move' || u.order === 'attack'));
-    push(`right-click-move:${moving.length > 0 ? 'OK' : 'FAIL'}`);
+    push(`left-click-move:${moving.length > 0 ? 'OK' : 'FAIL'}`);
+
+    // Shift + 左键 = 追加路径点
+    const wp = renderer.tileToScreen(unit.x - 5, unit.y - 5);
+    send('pointerdown', wp.x, wp.y, 0, 1, true);
+    send('pointerup', wp.x, wp.y, 0, 1, true);
+    pump(3);
+    const queued = [...ctrl.selection]
+      .map((id) => world.unitById.get(id))
+      .some((u) => u && u.waypoints.length > 0);
+    push(`waypoint:${queued ? 'OK' : 'FAIL'}`);
 
     const before = new Map([...ctrl.selection].map((id) => [id, world.unitById.get(id)?.x ?? 0]));
     pump(30);
@@ -176,6 +188,29 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
     push(`placing-mode:${ctrl.placing ? 'OK' : 'FAIL'}`);
     ctrl.placing = null;
     renderer.ghost = null;
+
+    // 把造好的兵营落地，然后测试出售
+    const readyKind = world.players[0].readyBuilding;
+    if (readyKind && base) {
+      const spot = world.findPlacement(readyKind, 0, base.x, base.y, 10);
+      if (spot) {
+        world.enqueue({ c: 'placeBuilding', kind: readyKind, tx: spot.x, ty: spot.y });
+        pump(3);
+      }
+    }
+
+    // 出售建筑
+    const bld = world.buildings.find((b) => b.owner === 0 && b.kind === 'bingying');
+    if (bld) {
+      const before = world.players[0].credits;
+      ctrl.selectedBuilding = bld.id;
+      ctrl.sellSelected();
+      pump(3);
+      const gone = !world.buildingById.get(bld.id);
+      push(`sell-building:${gone && world.players[0].credits > before ? 'OK' : 'FAIL'}`);
+    } else {
+      push('sell-building:SKIP');
+    }
   } catch (err) {
     push('exception:' + String(err));
   } finally {

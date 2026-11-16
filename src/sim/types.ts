@@ -49,6 +49,8 @@ export interface Unit {
   lastX: number;
   lastY: number;
   alive: boolean;
+  /** 追加的路径点：走完当前目的地后依次前往 */
+  waypoints: Vec[];
 }
 
 export interface Building {
@@ -94,6 +96,8 @@ export type Command =
   | { c: 'attackTarget'; ids: number[]; targetUnit: number; targetBuilding: number }
   | { c: 'stop'; ids: number[] }
   | { c: 'deploy'; ids: number[] }
+  | { c: 'queueMove'; ids: number[]; x: number; y: number }
+  | { c: 'sell'; id: number }
   | { c: 'queueUnit'; kind: UnitKind }
   | { c: 'queueBuilding'; kind: BuildingKind }
   | { c: 'cancelUnit' }

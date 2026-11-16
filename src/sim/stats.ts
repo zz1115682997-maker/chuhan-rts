@@ -138,6 +138,8 @@ export const HARVEST_RATE = 1.2;    // seconds per harvest tick
 export const HARVEST_PER_TICK = 50; // cargo units gained per tick
 export const GRAIN_VALUE = 2.5;     // credits per cargo unit delivered
 export const START_CREDITS = 5000;
+/** 出售已建成建筑时返还的造价比率（红警标准为 50%） */
+export const SELL_RATIO = 0.5;
 
 export const FACTION_NAMES: Record<Faction, string> = {
   han: '汉',

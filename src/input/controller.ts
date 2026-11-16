@@ -16,6 +16,8 @@ export class Controller {
   groups = new Map<number, number[]>();
   placing: BuildingKind | null = null;
   attackMode = false;
+  /** 红警式左键下令：左键点地面/敌人直接下命令，右键取消 */
+  leftClickOrders = true;
 
   private world: World;
   private renderer: Renderer;
@@ -36,6 +38,11 @@ export class Controller {
     this.renderer = renderer;
     this.hud = hud;
     this.canvas = renderer.app.canvas as HTMLCanvasElement;
+    try {
+      this.leftClickOrders = window.localStorage.getItem('opMode') !== 'right';
+    } catch {
+      /* localStorage 不可用时用默认值 */
+    }
     this.bind();
   }
 
@@ -78,7 +85,8 @@ export class Controller {
       this.lastMouse = p;
 
       if (this.middleDrag) {
-        this.renderer.panScreen(this.dragStart.x - p.x, this.dragStart.y - p.y);
+        // 抓住地图拖：内容跟着鼠标走
+        this.renderer.panScreen(p.x - this.dragStart.x, p.y - this.dragStart.y);
         this.dragStart = p;
         return;
       }
@@ -98,6 +106,8 @@ export class Controller {
       const dy = p.y - this.dragStart.y;
       if (dx * dx + dy * dy > 36) {
         this.boxSelect(this.dragStart, p, e.shiftKey);
+      } else if (this.leftClickOrders) {
+        this.leftClick(p.x, p.y, e.shiftKey);
       } else {
         this.clickSelect(p.x, p.y, e.shiftKey);
       }
@@ -280,6 +290,61 @@ export class Controller {
 
   // ------------------------------------------------------------- orders
 
+  /** 在当前光标位置找敌方目标 */
+  private pickEnemyAt(tx: number, ty: number): { unitId: number; buildingId: number } | null {
+    for (const u of this.world.units) {
+      if (u.owner === 0 || !u.alive) continue;
+      if ((u.x - tx) ** 2 + (u.y - ty) ** 2 < 0.8) return { unitId: u.id, buildingId: 0 };
+    }
+    for (const b of this.world.buildings) {
+      if (b.owner === 0 || !b.alive) continue;
+      if (tx >= b.tx && tx <= b.tx + b.w && ty >= b.ty && ty <= b.ty + b.h) {
+        return { unitId: 0, buildingId: b.id };
+      }
+    }
+    return null;
+  }
+
+  /** 红警式左键：点自己人=选中，点敌人=攻击，点地面=移动；Shift=追加路径点 */
+  private leftClick(sx: number, sy: number, shift: boolean): void {
+    const own = this.pickOwnUnit(sx, sy);
+    if (own !== null) {
+      this.clickSelect(sx, sy, shift);
+      return;
+    }
+    const bld = this.pickBuildingAt(sx, sy);
+    if (bld !== null) {
+      const b = this.world.buildingById.get(bld);
+      if (b && b.owner === 0) {
+        this.selectedBuilding = bld;
+        this.selection.clear();
+        return;
+      }
+    }
+    const t = this.renderer.screenToTile(sx, sy);
+    const ids = [...this.selection];
+    if (ids.length === 0) {
+      if (!shift) {
+        this.selection.clear();
+        this.selectedBuilding = null;
+      }
+      return;
+    }
+    const enemy = this.pickEnemyAt(t.x, t.y);
+    if (enemy) {
+      this.world.enqueue({ c: 'attackTarget', ids, targetUnit: enemy.unitId, targetBuilding: enemy.buildingId });
+      return;
+    }
+    if (shift) {
+      this.world.enqueue({ c: 'queueMove', ids, x: t.x, y: t.y });
+    } else if (this.attackMode) {
+      this.world.enqueue({ c: 'attackMove', ids, x: t.x, y: t.y });
+      this.attackMode = false;
+    } else {
+      this.world.enqueue({ c: 'move', ids, x: t.x, y: t.y });
+    }
+  }
+
   private rightClick(sx: number, sy: number): void {
     if (this.placing) {
       this.placing = null;
@@ -287,32 +352,34 @@ export class Controller {
       this.hud.refresh();
       return;
     }
+    // 选中建筑时右键设置集结点
+    if (this.selectedBuilding !== null && this.selection.size === 0) {
+      this.setRally(sx, sy);
+      return;
+    }
     const ids = [...this.selection];
+    if (this.leftClickOrders) {
+      // 红警式：右键只做取消
+      if (ids.length > 0) {
+        this.world.enqueue({ c: 'stop', ids });
+        this.attackMode = false;
+      } else {
+        this.selection.clear();
+        this.selectedBuilding = null;
+      }
+      return;
+    }
     if (ids.length === 0) return;
 
-    // enemy target?
     const t = this.renderer.screenToTile(sx, sy);
-    let targetUnit = 0;
-    let targetBuilding = 0;
-    for (const u of this.world.units) {
-      if (u.owner === 0) continue;
-      if ((u.x - t.x) ** 2 + (u.y - t.y) ** 2 < 0.8) {
-        targetUnit = u.id;
-        break;
-      }
-    }
-    if (targetUnit === 0) {
-      for (const b of this.world.buildings) {
-        if (b.owner === 0) continue;
-        if (t.x >= b.tx && t.x <= b.tx + b.w && t.y >= b.ty && t.y <= b.ty + b.h) {
-          targetBuilding = b.id;
-          break;
-        }
-      }
-    }
-
-    if (targetUnit !== 0 || targetBuilding !== 0) {
-      this.world.enqueue({ c: 'attackTarget', ids, targetUnit, targetBuilding });
+    const enemy = this.pickEnemyAt(t.x, t.y);
+    if (enemy) {
+      this.world.enqueue({
+        c: 'attackTarget',
+        ids,
+        targetUnit: enemy.unitId,
+        targetBuilding: enemy.buildingId,
+      });
       return;
     }
     if (this.attackMode) {
@@ -321,6 +388,29 @@ export class Controller {
     } else {
       this.world.enqueue({ c: 'move', ids, x: t.x, y: t.y });
     }
+  }
+
+  toggleOpMode(): void {
+    this.leftClickOrders = !this.leftClickOrders;
+    try {
+      window.localStorage.setItem('opMode', this.leftClickOrders ? 'left' : 'right');
+    } catch {
+      /* ignore */
+    }
+    this.hud.refresh();
+    this.hud.toast(
+      this.leftClickOrders ? '操作方式：左键下令（红警式）' : '操作方式：右键下令（传统式）'
+    );
+  }
+
+  sellSelected(): void {
+    if (this.selectedBuilding === null) return;
+    const b = this.world.buildingById.get(this.selectedBuilding);
+    if (!b) return;
+    this.world.enqueue({ c: 'sell', id: this.selectedBuilding });
+    this.selectedBuilding = null;
+    this.hud.toast('已出售，返还一半粮草');
+    this.hud.refresh();
   }
 
   // ------------------------------------------------------------- production

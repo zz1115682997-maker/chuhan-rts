@@ -41,6 +41,8 @@ export class Hud implements HudPort {
   private overlay: HTMLElement;
   private placeBtn: HTMLButtonElement;
   private deployBtn: HTMLButtonElement;
+  private sellBtn: HTMLButtonElement;
+  private opBtn: HTMLButtonElement;
   private toastLife = 0;
   private frameCount = 0;
 
@@ -54,6 +56,8 @@ export class Hud implements HudPort {
     el('span', 'faction', top).textContent = FACTION_NAMES[fac];
     this.creditsEl = el('span', 'credits', top);
     this.timerEl = el('span', 'timer', top);
+    this.opBtn = el('button', 'opbtn', top);
+    this.opBtn.addEventListener('click', () => this.ctrl?.toggleOpMode());
 
     // --- right column: minimap + queues
     const right = el('div', 'right', root);
@@ -110,6 +114,11 @@ export class Hud implements HudPort {
     this.deployBtn.innerHTML = '<span class="nm">立旗扎营</span><span class="cost">F</span>';
     this.deployBtn.title = '选中军旗后按 F，就地立旗建营';
     this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
+
+    this.sellBtn = el('button', 'btn sell', buildRow);
+    this.sellBtn.innerHTML = '<span class="nm">出售建筑</span><span class="cost">退 50%</span>';
+    this.sellBtn.title = '选中已建成的建筑后出售';
+    this.sellBtn.addEventListener('click', () => this.ctrl?.sellSelected());
 
     const unitCol = el('div', 'col', bottom);
     el('h4', undefined, unitCol).textContent = '兵种';
@@ -190,6 +199,9 @@ export class Hud implements HudPort {
       }
     }
     this.deployBtn.style.display = hasMcv ? '' : 'none';
+    this.sellBtn.style.display = this.ctrl && this.ctrl.selectedBuilding !== null ? '' : 'none';
+    this.opBtn.textContent = this.ctrl?.leftClickOrders ? '左键下令' : '右键下令';
+    this.opBtn.title = '切换操作方式（红警式左键下令 / 传统右键下令）';
 
     // queues
     this.queueEl.innerHTML = '';
@@ -213,8 +225,17 @@ export class Hud implements HudPort {
     addQueue('建筑', this.world.players[0].buildingQueue as never, () => this.ctrl?.cancelBuilding());
     if (p.readyBuilding) {
       const row = el('div', 'qready', this.queueEl);
-      row.textContent = `${BUILDING_DEFS[p.readyBuilding].name} 已就绪 · 点击放置`;
-      row.addEventListener('click', () => this.ctrl?.startPlacing());
+      const txt = el('span', undefined, row);
+      txt.textContent = `${BUILDING_DEFS[p.readyBuilding].name} 已就绪 · 点击放置`;
+      txt.style.flex = '1';
+      txt.addEventListener('click', () => this.ctrl?.startPlacing());
+      const cancel = el('button', 'qx', row);
+      cancel.textContent = '×';
+      cancel.title = '取消并全额退款';
+      cancel.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.ctrl?.cancelBuilding();
+      });
     }
   }
 

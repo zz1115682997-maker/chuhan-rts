@@ -163,11 +163,12 @@ export class Renderer {
     this.world.y = this.screenH / 2 - isoY(this.cam.x, this.cam.y) * this.zoom;
   }
 
+  /** 按屏幕像素量移动画面内容：正数表示地图内容向右/向下移动。 */
   panScreen(dx: number, dy: number): void {
     const ndx = dx / ((TILE_W / 2) * this.zoom);
     const ndy = dy / ((TILE_H / 2) * this.zoom);
-    this.cam.x += (ndx + ndy) / 2;
-    this.cam.y += (ndy - ndx) / 2;
+    this.cam.x -= (ndx + ndy) / 2;
+    this.cam.y += (ndx - ndy) / 2;
     this.clampCam();
   }
 
@@ -344,6 +345,14 @@ export class Renderer {
       g.ellipse(cx, cy, r, r * 0.52).stroke({ width: 2.4, color: 0xa6ffc0, alpha: 1 });
       // little marker so it stays readable when units overlap
       g.rect(cx - 1.5, cy - r * 0.52 - 13, 3, 8).fill({ color: 0xa6ffc0, alpha: 0.95 });
+
+      // queued waypoints
+      for (const wp of u.waypoints) {
+        const wx = isoX(wp.x, wp.y);
+        const wy = isoY(wp.x, wp.y);
+        g.circle(wx, wy, 4.5).fill({ color: 0xa6ffc0, alpha: 0.55 });
+        g.circle(wx, wy, 4.5).stroke({ width: 1.5, color: 0xe6ffe9, alpha: 0.9 });
+      }
     }
 
     // selected building outline

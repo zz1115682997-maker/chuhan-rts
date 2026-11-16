@@ -7,7 +7,7 @@ import { findPath, lineOfSight } from './path.js';
 import { Rng } from './rng.js';
 import {
   BUILDING_DEFS, UNIT_DEFS, DAMAGE_TABLE,
-  HARVEST_RATE, HARVEST_PER_TICK, GRAIN_VALUE, START_CREDITS,
+  HARVEST_RATE, HARVEST_PER_TICK, GRAIN_VALUE, START_CREDITS, SELL_RATIO,
 } from './stats.js';
 import type {
   Building, BuildingKind, BuildItem, Command, Faction, PlayerState, SimEvent, Unit, UnitKind, Vec,
@@ -156,10 +156,17 @@ export class World {
           u.targetBuilding = 0;
           u.destX = NaN;
           u.destY = NaN;
+          u.waypoints.length = 0;
         }
         break;
       case 'deploy':
         for (const id of c.ids) this.deployUnit(id);
+        break;
+      case 'queueMove':
+        this.queueMove(c.ids, c.x, c.y);
+        break;
+      case 'sell':
+        this.sellBuilding(c.id);
         break;
       case 'queueUnit':
         this.queueUnit(0, c.kind);
@@ -176,7 +183,13 @@ export class World {
       case 'cancelBuilding': {
         const p = this.players[0];
         const it = p.buildingQueue.pop();
-        if (it) p.credits += it.cost;
+        if (it) {
+          p.credits += it.cost;
+        } else if (p.readyBuilding) {
+          // 已造好但还没落地：取消并全额退款
+          p.credits += BUILDING_DEFS[p.readyBuilding].cost;
+          p.readyBuilding = null;
+        }
         break;
       }
       case 'placeBuilding':
@@ -208,26 +221,67 @@ export class World {
       const u = list[i];
       const gx = x + ((i % cols) - (cols - 1) / 2) * 0.95;
       const gy = y + (Math.floor(i / cols) - (rows - 1) / 2) * 0.95;
-      u.destX = gx;
-      u.destY = gy;
-      u.order = attack ? 'attack' : 'move';
-      u.targetUnit = 0;
-      u.targetBuilding = 0;
-      u.path = [];
-      u.pathI = 0;
-      u.repathTimer = 0;
-      if (!attack) {
-        const from = this.map.nearestPassable(Math.floor(u.x), Math.floor(u.y), 4);
-        const to = this.map.nearestPassable(Math.floor(gx), Math.floor(gy), 10);
-        if (from && to) {
-          const p = findPath(this.map, from.x, from.y, to.x, to.y);
-          if (p) {
-            u.path = p;
-            u.pathI = 0;
-          }
-        }
+      u.waypoints.length = 0;
+      if (attack) {
+        u.destX = gx;
+        u.destY = gy;
+        u.order = 'attack';
+        u.targetUnit = 0;
+        u.targetBuilding = 0;
+        u.path = [];
+        u.pathI = 0;
+        u.repathTimer = 0;
+      } else {
+        this.startMove(u, gx, gy);
       }
     }
+  }
+
+  /** 开始走向一个点（会清空原有路径，但不清空路径点队列）。 */
+  private startMove(u: Unit, x: number, y: number): void {
+    u.destX = x;
+    u.destY = y;
+    u.order = 'move';
+    u.targetUnit = 0;
+    u.targetBuilding = 0;
+    u.path = [];
+    u.pathI = 0;
+    u.repathTimer = 0;
+    const from = this.map.nearestPassable(Math.floor(u.x), Math.floor(u.y), 4);
+    const to = this.map.nearestPassable(Math.floor(x), Math.floor(y), 10);
+    if (from && to) {
+      const p = findPath(this.map, from.x, from.y, to.x, to.y);
+      if (p) {
+        u.path = p;
+        u.pathI = 0;
+      }
+    }
+  }
+
+  /** Shift + 点击：给正在移动的单位追加一个路径点。 */
+  private queueMove(ids: number[], x: number, y: number): void {
+    for (const id of ids) {
+      const u = this.unitById.get(id);
+      if (!u || !u.alive) continue;
+      if (u.order === 'move') {
+        u.waypoints.push({ x, y });
+      } else {
+        u.waypoints.length = 0;
+        this.startMove(u, x, y);
+      }
+    }
+  }
+
+  /** 出售已建成的建筑，按比例返还粮草。 */
+  sellBuilding(id: number): boolean {
+    const b = this.buildingById.get(id);
+    if (!b || !b.alive || b.owner !== 0) return false;
+    const def = BUILDING_DEFS[b.kind];
+    this.players[b.owner].credits += Math.round(def.cost * SELL_RATIO);
+    b.alive = false;
+    this.map.clearOccupied(b.tx, b.ty, b.w, b.h);
+    this.events.push({ t: 'die', x: b.x, y: b.y, owner: b.owner });
+    return true;
   }
 
   // ---------------------------------------------------------------- production
@@ -379,7 +433,7 @@ export class World {
       destX: NaN, destY: NaN,
       targetUnit: 0, targetBuilding: 0, cooldown: 0,
       cargo: 0, harvestTimer: 0, repathTimer: 0, stuckTimer: 0,
-      lastX: x, lastY: y, alive: true,
+      lastX: x, lastY: y, alive: true, waypoints: [],
     };
     this.units.push(u);
     this.unitById.set(u.id, u);
@@ -444,9 +498,14 @@ export class World {
       this.updateAttack(u, dt);
     } else if (u.order === 'move') {
       if (this.followPath(u, dt)) {
-        u.order = 'idle';
-        u.path = [];
-        u.pathI = 0;
+        const next = u.waypoints.shift();
+        if (next) {
+          this.startMove(u, next.x, next.y);
+        } else {
+          u.order = 'idle';
+          u.path = [];
+          u.pathI = 0;
+        }
       }
     } else {
       this.acquireIfIdle(u);
