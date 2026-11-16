@@ -65,6 +65,16 @@ function drawUnit(kind: UnitKind, owner: number): Container {
   g.ellipse(0, 6, 14, 6).fill({ color: 0x000000, alpha: 0.3 });
 
   switch (kind) {
+    case 'mcv': {
+      // 基地车：方头卡车 + 折叠吊臂
+      g.roundRect(-19, -15, 38, 21, 4).fill(0x6f7a58).stroke({ width: 2, color: INK });
+      g.roundRect(2, -19, 17, 12, 3).fill(col).stroke({ width: 2, color: INK });
+      g.moveTo(-10, -15).lineTo(-10, -33).lineTo(4, -26).stroke({ width: 3, color: 0xc8a24a });
+      g.circle(-12, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
+      g.circle(-2, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
+      g.circle(11, 7, 6).fill(0x2b2b2b).stroke({ width: 1.5, color: INK });
+      break;
+    }
     case 'han_zu':
     case 'chu_zidi': {
       const r = kind === 'chu_zidi' ? 9.5 : 7.5;
@@ -160,6 +170,10 @@ function drawIcon(kind: UnitKind, owner: number): Container {
   const col = FACTION_COLOR[owner];
   g.circle(0, 0, 22).fill({ color: col, alpha: 0.18 }).stroke({ width: 2, color: col });
   switch (kind) {
+    case 'mcv':
+      g.roundRect(-14, -10, 28, 20, 3).fill(0x6f7a58).stroke({ width: 2, color: INK });
+      g.roundRect(0, -16, 13, 10, 2).fill(col).stroke({ width: 2, color: INK });
+      break;
     case 'han_zu':
     case 'chu_zidi':
       g.circle(0, -2, 9).fill(col).stroke({ width: 2, color: INK });

@@ -40,6 +40,7 @@ export class Hud implements HudPort {
   private mmCtx: CanvasRenderingContext2D;
   private overlay: HTMLElement;
   private placeBtn: HTMLButtonElement;
+  private deployBtn: HTMLButtonElement;
   private toastLife = 0;
   private frameCount = 0;
 
@@ -88,6 +89,11 @@ export class Hud implements HudPort {
     this.placeBtn = el('button', 'btn place', buildRow);
     this.placeBtn.innerHTML = '<span class="nm">放置建筑</span>';
     this.placeBtn.addEventListener('click', () => this.ctrl?.startPlacing());
+
+    this.deployBtn = el('button', 'btn deploy', buildRow);
+    this.deployBtn.innerHTML = '<span class="nm">展开基地车</span><span class="cost">F</span>';
+    this.deployBtn.title = '选中基地车后按 F 展开成大营';
+    this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
 
     const unitCol = el('div', 'col', bottom);
     el('h4', undefined, unitCol).textContent = '兵种';
@@ -144,10 +150,11 @@ export class Hud implements HudPort {
 
   private updateButtons(): void {
     const p = this.world.players[0];
+    const hasYard = this.world.hasBuilding(0, 'daying');
     for (const [kind, btn] of this.buildBtns) {
       const def = BUILDING_DEFS[kind as BuildingKind];
       const locked = !!def.requires && !this.world.hasBuilding(0, def.requires);
-      btn.disabled = p.credits < def.cost || locked || !!p.readyBuilding;
+      btn.disabled = p.credits < def.cost || locked || !!p.readyBuilding || !hasYard;
     }
     for (const [kind, btn] of this.unitBtns) {
       const def = UNIT_DEFS[kind as UnitKind];
@@ -155,6 +162,18 @@ export class Hud implements HudPort {
       btn.disabled = p.credits < def.cost || !hasProducer;
     }
     this.placeBtn.style.display = p.readyBuilding ? '' : 'none';
+
+    let hasMcv = false;
+    if (this.ctrl) {
+      for (const id of this.ctrl.selection) {
+        const u = this.world.unitById.get(id);
+        if (u && u.kind === 'mcv') {
+          hasMcv = true;
+          break;
+        }
+      }
+    }
+    this.deployBtn.style.display = hasMcv ? '' : 'none';
 
     // queues
     this.queueEl.innerHTML = '';

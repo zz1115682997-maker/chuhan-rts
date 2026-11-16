@@ -406,7 +406,7 @@ export class Renderer {
 function unitKindsFor(world: World): import('../sim/types.js').UnitKind[] {
   const set = new Set<import('../sim/types.js').UnitKind>();
   for (const u of world.units) set.add(u.kind);
-  for (const k of ['han_zu', 'han_nuge', 'han_wugang', 'chu_zidi', 'chu_qi', 'chu_chongche', 'grainCart'] as const) {
+  for (const k of ['mcv', 'han_zu', 'han_nuge', 'han_wugang', 'chu_zidi', 'chu_qi', 'chu_chongche', 'grainCart'] as const) {
     set.add(k);
   }
   return [...set];

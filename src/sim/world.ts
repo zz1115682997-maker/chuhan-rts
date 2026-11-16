@@ -77,20 +77,24 @@ export class World {
   }
 
   private setupBase(owner: number, cx: number, cy: number): void {
-    this.addBuildingAt('daying', owner, cx - 1, cy - 1);
-    const spot = this.findPlacement('canglin', owner, cx, cy, 9);
-    if (spot) this.addBuildingAt('canglin', owner, spot.x, spot.y);
+    // 开局只有一辆可移动的基地车，展开成大营之后才能开始建造
+    const spot = this.findSpawnSpot(cx, cy, 2);
+    if (spot) this.spawnUnit('mcv', owner, spot.x, spot.y);
+  }
 
-    const faction = this.players[owner].faction;
-    const cartSpot = this.findSpawnSpot(cx, cy, 3);
-    if (cartSpot) this.spawnUnit('grainCart', owner, cartSpot.x, cartSpot.y);
-
-    const basic: UnitKind = faction === 'han' ? 'han_zu' : 'chu_zidi';
-    const count = faction === 'han' ? 3 : 2;
-    for (let i = 0; i < count; i++) {
-      const s = this.findSpawnSpot(cx, cy, 4);
-      if (s) this.spawnUnit(basic, owner, s.x, s.y);
-    }
+  /** 基地车展开：就地变成大营。位置放不下则失败。 */
+  deployUnit(id: number): boolean {
+    const u = this.unitById.get(id);
+    if (!u || !u.alive || u.kind !== 'mcv') return false;
+    const def = BUILDING_DEFS.daying;
+    const tx = Math.round(u.x - def.w / 2);
+    const ty = Math.round(u.y - def.h / 2);
+    if (!this.map.blockRectFree(tx, ty, def.w, def.h)) return false;
+    u.alive = false;
+    this.unitById.delete(id);
+    this.addBuildingAt('daying', u.owner, tx, ty);
+    this.events.push({ t: 'built', x: u.x, y: u.y, owner: u.owner });
+    return true;
   }
 
   // ---------------------------------------------------------------- main loop
@@ -153,6 +157,9 @@ export class World {
           u.destX = NaN;
           u.destY = NaN;
         }
+        break;
+      case 'deploy':
+        for (const id of c.ids) this.deployUnit(id);
         break;
       case 'queueUnit':
         this.queueUnit(0, c.kind);
@@ -308,6 +315,11 @@ export class World {
     if (p.readyBuilding !== kind) return false;
     this.addBuildingAt(kind, owner, tx, ty);
     p.readyBuilding = null;
+    // 仓廪落成时附赠一辆粮车
+    if (kind === 'canglin') {
+      const spot = this.findSpawnSpot(tx + def.w / 2, ty + def.h / 2, 3);
+      if (spot) this.spawnUnit('grainCart', owner, spot.x, spot.y);
+    }
     return true;
   }
 
@@ -783,6 +795,15 @@ export class World {
       else p1 = true;
       if (p0 && p1) return;
     }
+    // 还没展开的基地车也算"还活着"，否则开局瞬间就判负了
+    if (!p0 || !p1) {
+      for (const u of this.units) {
+        if (!u.alive || u.kind !== 'mcv') continue;
+        if (u.owner === 0) p0 = true;
+        else p1 = true;
+      }
+    }
+    if (p0 && p1) return;
     if (!p0 && !p1) this.state = 'won';
     else if (!p0) this.state = 'lost';
     else this.state = 'won';

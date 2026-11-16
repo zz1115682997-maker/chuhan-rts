@@ -4,6 +4,7 @@
 export type Faction = 'han' | 'chu';
 
 export type UnitKind =
+  | 'mcv'
   | 'han_zu'
   | 'han_nuge'
   | 'han_wugang'
@@ -92,6 +93,7 @@ export type Command =
   | { c: 'attackMove'; ids: number[]; x: number; y: number }
   | { c: 'attackTarget'; ids: number[]; targetUnit: number; targetBuilding: number }
   | { c: 'stop'; ids: number[] }
+  | { c: 'deploy'; ids: number[] }
   | { c: 'queueUnit'; kind: UnitKind }
   | { c: 'queueBuilding'; kind: BuildingKind }
   | { c: 'cancelUnit' }

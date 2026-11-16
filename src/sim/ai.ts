@@ -21,6 +21,24 @@ export class AIController {
     const p = world.players[this.owner];
     if (!p) return;
 
+    // 0) 开局：把基地车开到合适位置展开
+    if (!world.hasBuilding(this.owner, 'daying')) {
+      const mcv = world.units.find((u) => u.alive && u.owner === this.owner && u.kind === 'mcv');
+      if (mcv) {
+        const spot = this.findDeploySpot(world);
+        if (spot) {
+          const cx = spot.x + 1.5;
+          const cy = spot.y + 1.5;
+          if (Math.hypot(mcv.x - cx, mcv.y - cy) < 1.2) {
+            world.enqueue({ c: 'deploy', ids: [mcv.id] });
+          } else {
+            world.enqueue({ c: 'move', ids: [mcv.id], x: cx, y: cy });
+          }
+        }
+      }
+      return;
+    }
+
     // 1) drop a finished building on the map
     if (p.readyBuilding) {
       const spot = world.findPlacement(p.readyBuilding, this.owner, AI_BASE.x, AI_BASE.y, 13);
@@ -88,6 +106,20 @@ export class AIController {
       if (u.alive && u.owner === this.owner && UNIT_DEFS[u.kind].isHarvester) n++;
     }
     return n;
+  }
+
+  private findDeploySpot(world: World): { x: number; y: number } | null {
+    for (let r = 0; r <= 9; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const tx = AI_BASE.x + dx;
+          const ty = AI_BASE.y + dy;
+          if (world.map.blockRectFree(tx, ty, 3, 3)) return { x: tx, y: ty };
+        }
+      }
+    }
+    return null;
   }
 
   private nearestThreat(world: World, cx: number, cy: number, radius: number): Unit | null {

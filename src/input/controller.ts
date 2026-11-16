@@ -133,6 +133,7 @@ export class Controller {
         this.hud.refresh();
       }
       if (k === 'a') this.attackMode = !this.attackMode;
+      if (k === 'f') this.deploySelected();
       if (e.key >= '1' && e.key <= '9') {
         const n = Number(e.key);
         if (e.ctrlKey || e.metaKey) {
@@ -394,6 +395,27 @@ export class Controller {
     const t = this.renderer.screenToTile(sx, sy);
     this.world.enqueue({ c: 'setRally', id: this.selectedBuilding, x: t.x, y: t.y });
     this.hud.toast('集结点已设置');
+  }
+
+  /** 基地车展开成大营（红警式 MCV deploy） */
+  deploySelected(): void {
+    const def = BUILDING_DEFS.daying;
+    for (const id of this.selection) {
+      const u = this.world.unitById.get(id);
+      if (!u || !u.alive || u.kind !== 'mcv') continue;
+      const tx = Math.round(u.x - def.w / 2);
+      const ty = Math.round(u.y - def.h / 2);
+      if (!this.world.map.blockRectFree(tx, ty, def.w, def.h)) {
+        this.hud.toast('这里太窄展不开，开到开阔地再展开');
+        return;
+      }
+      this.world.enqueue({ c: 'deploy', ids: [id] });
+      this.selection.delete(id);
+      this.hud.refresh();
+      this.hud.toast('基地车展开中…');
+      return;
+    }
+    this.hud.toast('先选中一辆基地车');
   }
 
   setGameOver(win: boolean): void {

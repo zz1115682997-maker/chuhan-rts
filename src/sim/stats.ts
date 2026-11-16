@@ -47,6 +47,12 @@ export interface BuildingDef {
 // ---- 楚军 (项羽): 精锐、冲锋、机动，前期猛后期乏力 ---------------------------
 
 export const UNIT_DEFS: Record<UnitKind, UnitDef> = {
+  mcv: {
+    kind: 'mcv', name: '基地车', faction: 'neutral', cost: 0, buildTime: 0,
+    hp: 900, armor: 'heavy', speed: 1.5, radius: 0.55, sight: 6,
+    weapon: null, isHarvester: false, cargoMax: 0, from: 'daying', hotkey: 'D',
+    desc: '开到合适位置展开成大营，展开前无法建造',
+  },
   han_zu: {
     kind: 'han_zu', name: '汉卒', faction: 'han', cost: 150, buildTime: 3.5,
     hp: 130, armor: 'infantry', speed: 1.65, radius: 0.24, sight: 6,

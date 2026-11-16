@@ -35,10 +35,12 @@ async function boot(): Promise<void> {
   const ctrl = new Controller(world, renderer, hud);
   hud.attach(ctrl, renderer);
 
-  renderer.centerOn(10, 10);
+  const startMcv = world.units.find((u) => u.owner === 0 && u.kind === 'mcv');
+  if (startMcv) renderer.centerOn(startMcv.x, startMcv.y);
+  else renderer.centerOn(10, 10);
   renderer.applyCamera();
   hud.refresh();
-  hud.toast('左键框选 · 右键下令 · WASD 平移 · 滚轮缩放');
+  hud.toast('选中基地车 → 开到合适位置 → 按 F 展开成大营');
 
   const bootEl = document.getElementById('boot');
   if (bootEl) bootEl.remove();
@@ -113,6 +115,23 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
 
   try {
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 50));
+
+    // 先展开基地车，并造几个测试单位
+    const mcv = world.units.find((u) => u.owner === 0 && u.kind === 'mcv');
+    if (mcv) {
+      world.enqueue({ c: 'deploy', ids: [mcv.id] });
+      pump(5);
+    }
+    push(`mcv-deploy:${world.hasBuilding(0, 'daying') ? 'OK' : 'FAIL'}`);
+
+    const base = world.buildings.find((b) => b.owner === 0 && b.kind === 'daying');
+    if (base) {
+      for (let i = 0; i < 3; i++) {
+        const s = world.findSpawnSpot(base.x, base.y, 4);
+        if (s) world.spawnUnit('han_zu', 0, s.x, s.y);
+      }
+      pump(3);
+    }
 
     const unit = world.units.find((u) => u.owner === 0 && !UNIT_DEFS[u.kind].isHarvester);
     if (!unit) {
