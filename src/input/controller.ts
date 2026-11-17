@@ -4,6 +4,7 @@ import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { BuildingKind, UnitKind } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Renderer } from '../render/renderer.js';
+import { sfxOrder, sfxUnlock } from '../ui/sfx.js';
 
 export interface HudPort {
   toast(msg: string): void;
@@ -15,6 +16,8 @@ export class Controller {
   selectedBuilding: number | null = null;
   groups = new Map<number, number[]>();
   placing: BuildingKind | null = null;
+  private mouseOnMap = false;
+  private wallDrag: { x: number; y: number } | null = null;
   attackMode = false;
   /** 红警式左键下令：左键点地面/敌人直接下命令，右键取消 */
   leftClickOrders = true;
@@ -53,6 +56,7 @@ export class Controller {
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
     c.addEventListener('pointerdown', (e) => {
+      sfxUnlock();
       try {
         c.setPointerCapture(e.pointerId);
       } catch {
@@ -71,6 +75,11 @@ export class Controller {
         this.rightClick(p.x, p.y);
         return;
       }
+      if (this.placing === 'juma') {
+        this.wallDrag = p;
+        this.updateGhost();
+        return;
+      }
       if (this.placing) {
         this.placeAt(p.x, p.y);
         return;
@@ -83,6 +92,7 @@ export class Controller {
     c.addEventListener('pointermove', (e) => {
       const p = { x: e.offsetX, y: e.offsetY };
       this.lastMouse = p;
+      this.mouseOnMap = true;
 
       if (this.middleDrag) {
         // 抓住地图拖：内容跟着鼠标走
@@ -98,6 +108,11 @@ export class Controller {
       const p = { x: e.offsetX, y: e.offsetY };
       if (this.middleDrag) {
         this.middleDrag = false;
+        return;
+      }
+      if (e.button === 0 && this.wallDrag) {
+        this.finishWall(p);
+        this.wallDrag = null;
         return;
       }
       if (e.button !== 0 || !this.dragging) return;
@@ -126,6 +141,7 @@ export class Controller {
     c.addEventListener('pointerleave', () => {
       this.edge.x = 0;
       this.edge.y = 0;
+      this.mouseOnMap = false;
     });
 
     c.addEventListener(
@@ -204,6 +220,7 @@ export class Controller {
     dx += this.edge.x * speed * 1.15;
     dy += this.edge.y * speed * 1.15;
     if (dx !== 0 || dy !== 0) this.renderer.panScreen(-dx, -dy);
+    this.renderer.orderLine = this.orderPreview();
   }
 
   // ------------------------------------------------------------- picking
@@ -214,7 +231,7 @@ export class Controller {
 
   private pickOwnUnit(sx: number, sy: number): number | null {
     let best: number | null = null;
-    let bestD = 26 * 26;
+    let bestD = 40 * 40;
     for (const u of this.world.units) {
       if (u.owner !== 0) continue;
       const p = this.unitScreen(u);
@@ -293,11 +310,11 @@ export class Controller {
   /** 在当前光标位置找敌方目标 */
   private pickEnemyAt(tx: number, ty: number): { unitId: number; buildingId: number } | null {
     for (const u of this.world.units) {
-      if (u.owner === 0 || !u.alive) continue;
+      if (u.owner === 0 || !u.alive || !this.world.unitVisible(0, u)) continue;
       if ((u.x - tx) ** 2 + (u.y - ty) ** 2 < 0.8) return { unitId: u.id, buildingId: 0 };
     }
     for (const b of this.world.buildings) {
-      if (b.owner === 0 || !b.alive) continue;
+      if (b.owner === 0 || !b.alive || !this.world.buildingVisible(0, b)) continue;
       if (tx >= b.tx && tx <= b.tx + b.w && ty >= b.ty && ty <= b.ty + b.h) {
         return { unitId: 0, buildingId: b.id };
       }
@@ -309,6 +326,13 @@ export class Controller {
   private leftClick(sx: number, sy: number, shift: boolean): void {
     const own = this.pickOwnUnit(sx, sy);
     if (own !== null) {
+      const medics = [...this.selection].filter((id) => this.world.unitById.get(id)?.kind === 'weixiuche' && id !== own);
+      const patient = this.world.unitById.get(own);
+      if (medics.length > 0 && patient && patient.hp < patient.maxHp) {
+        this.world.enqueue({ c: 'repairUnit', ids: medics, target: own });
+        this.hud.toast('维修车前去修兵');
+        return;
+      }
       this.clickSelect(sx, sy, shift);
       return;
     }
@@ -316,6 +340,15 @@ export class Controller {
     if (bld !== null) {
       const b = this.world.buildingById.get(bld);
       if (b && b.owner === 0) {
+        const workers = [...this.selection].filter((id) => {
+          const k = this.world.unitById.get(id)?.kind;
+          return k === 'gongjiang' || k === 'weixiuche';
+        });
+        if (workers.length > 0) {
+          this.world.enqueue({ c: 'repair', ids: workers, building: b.id });
+          this.hud.toast(workers.some((id) => this.world.unitById.get(id)?.kind === 'weixiuche') ? '维修车前去修缮' : '工匠前去修缮');
+          return;
+        }
         this.selectedBuilding = bld;
         this.selection.clear();
         return;
@@ -333,23 +366,25 @@ export class Controller {
     const enemy = this.pickEnemyAt(t.x, t.y);
     if (enemy) {
       this.world.enqueue({ c: 'attackTarget', ids, targetUnit: enemy.unitId, targetBuilding: enemy.buildingId });
+      sfxOrder();
       return;
     }
     if (shift) {
       this.world.enqueue({ c: 'queueMove', ids, x: t.x, y: t.y });
+      sfxOrder();
     } else if (this.attackMode) {
       this.world.enqueue({ c: 'attackMove', ids, x: t.x, y: t.y });
       this.attackMode = false;
+      sfxOrder();
     } else {
       this.world.enqueue({ c: 'move', ids, x: t.x, y: t.y });
+      sfxOrder();
     }
   }
 
   private rightClick(sx: number, sy: number): void {
     if (this.placing) {
-      this.placing = null;
-      this.renderer.ghost = null;
-      this.hud.refresh();
+      this.refundReady();
       return;
     }
     // 选中建筑时右键设置集结点
@@ -359,14 +394,11 @@ export class Controller {
     }
     const ids = [...this.selection];
     if (this.leftClickOrders) {
-      // 红警式：右键只做取消
-      if (ids.length > 0) {
-        this.world.enqueue({ c: 'stop', ids });
-        this.attackMode = false;
-      } else {
-        this.selection.clear();
-        this.selectedBuilding = null;
-      }
+      // 右键只取消选中和目标线。已经下达的移动、攻击继续执行。
+      this.attackMode = false;
+      this.selection.clear();
+      this.selectedBuilding = null;
+      this.hud.refresh();
       return;
     }
     if (ids.length === 0) return;
@@ -426,8 +458,12 @@ export class Controller {
       this.hud.toast(`需要先造${BUILDING_DEFS[def.requires].name}`);
       return;
     }
+    if (p.readyBuilding === kind) {
+      this.startPlacing();
+      return;
+    }
     if (p.readyBuilding) {
-      this.hud.toast('有一个建筑已经造好，先放置它');
+      this.hud.toast('有建筑已造好：左键放置，右键取消并全额退粮');
       return;
     }
     this.world.enqueue({ c: 'queueBuilding', kind });
@@ -463,10 +499,33 @@ export class Controller {
     const p = this.world.players[0];
     if (!p.readyBuilding) return;
     this.placing = p.readyBuilding;
-    this.hud.toast('点击地面放置建筑，右键取消');
+    this.hud.toast(
+      p.readyBuilding === 'juma'
+        ? '按住拖动，拒马会连成一排。右键取消，粮草全额退回'
+        : '左键放到地上。右键取消，粮草全额退回',
+    );
+  }
+
+  /** 红警式：造好的建筑，点一下进入放置，再右键删除并全额退粮。 */
+  refundReady(): void {
+    const p = this.world.players[0];
+    if (!p.readyBuilding && !this.placing) return;
+    this.world.enqueue({ c: 'cancelBuilding' });
+    this.placing = null;
+    this.wallDrag = null;
+    this.renderer.ghost = null;
+    this.renderer.wallCells = null;
+    this.hud.toast('已取消，粮草全额退回');
+    this.hud.refresh();
   }
 
   private updateGhost(): void {
+    if (this.wallDrag && this.placing === 'juma') {
+      this.renderer.ghost = null;
+      this.renderer.wallCells = this.previewWall(this.wallDrag, this.lastMouse);
+      return;
+    }
+    this.renderer.wallCells = null;
     if (!this.placing) {
       this.renderer.ghost = null;
       return;
@@ -476,7 +535,7 @@ export class Controller {
     const tx = Math.round(t.x - def.w / 2);
     const ty = Math.round(t.y - def.h / 2);
     const ok =
-      this.world.map.blockRectFree(tx, ty, def.w, def.h) &&
+      this.world.footprintFree(tx, ty, def.w, def.h) &&
       this.world.nearOwnBase(0, tx + def.w / 2, ty + def.h / 2, 9);
     this.renderer.ghost = { tx, ty, w: def.w, h: def.h, ok };
   }
@@ -488,7 +547,7 @@ export class Controller {
     const t = this.renderer.screenToTile(sx, sy);
     const tx = Math.round(t.x - def.w / 2);
     const ty = Math.round(t.y - def.h / 2);
-    if (!this.world.map.blockRectFree(tx, ty, def.w, def.h)) {
+    if (!this.world.footprintFree(tx, ty, def.w, def.h)) {
       this.hud.toast('这里放不下');
       return;
     }
@@ -499,6 +558,102 @@ export class Controller {
     this.world.enqueue({ c: 'placeBuilding', kind, tx, ty });
     this.placing = null;
     this.renderer.ghost = null;
+    this.hud.refresh();
+  }
+
+  /** 红警目标线：只在已经下令之后，从单位连到移动点或攻击目标。走到或右键取消就没了。 */
+  private orderPreview(): { x: number; y: number; tx: number; ty: number; attack: boolean }[] | null {
+    if (this.placing || this.selection.size === 0) return null;
+    const lines: { x: number; y: number; tx: number; ty: number; attack: boolean }[] = [];
+    for (const id of this.selection) {
+      const u = this.world.unitById.get(id);
+      if (!u || !u.alive || u.owner !== 0) continue;
+      if (u.order === 'attack') {
+        const tp = this.attackPoint(u);
+        if (tp) lines.push({ x: u.x, y: u.y, tx: tp.x, ty: tp.y, attack: true });
+      } else if ((u.order === 'move' || u.order === 'deliver') && Number.isFinite(u.destX)) {
+        lines.push({ x: u.x, y: u.y, tx: u.destX, ty: u.destY, attack: false });
+      }
+    }
+    return lines.length > 0 ? lines : null;
+  }
+
+  private attackPoint(u: { targetUnit: number; targetBuilding: number; destX: number; destY: number }): { x: number; y: number } | null {
+    if (u.targetUnit !== 0) {
+      const t = this.world.unitById.get(u.targetUnit);
+      if (t && t.alive) return { x: t.x, y: t.y };
+    }
+    if (u.targetBuilding !== 0) {
+      const b = this.world.buildingById.get(u.targetBuilding);
+      if (b && b.alive) return { x: b.x, y: b.y };
+    }
+    if (Number.isFinite(u.destX)) return { x: u.destX, y: u.destY };
+    return null;
+  }
+
+  private jumaTiles(a: { x: number; y: number }, b: { x: number; y: number }): { tx: number; ty: number }[] {
+    const cell = (p: { x: number; y: number }) => {
+      const t = this.renderer.screenToTile(p.x, p.y);
+      return { tx: Math.round(t.x - 0.5), ty: Math.round(t.y - 0.5) };
+    };
+    const s = cell(a);
+    const e = cell(b);
+    const tiles: { tx: number; ty: number }[] = [];
+    if (Math.abs(e.tx - s.tx) >= Math.abs(e.ty - s.ty)) {
+      const n = Math.min(20, Math.abs(e.tx - s.tx));
+      const step = e.tx >= s.tx ? 1 : -1;
+      for (let i = 0; i <= n; i++) tiles.push({ tx: s.tx + i * step, ty: s.ty });
+    } else {
+      const n = Math.min(20, Math.abs(e.ty - s.ty));
+      const step = e.ty >= s.ty ? 1 : -1;
+      for (let i = 0; i <= n; i++) tiles.push({ tx: s.tx, ty: s.ty + i * step });
+    }
+    return tiles;
+  }
+
+  private previewWall(a: { x: number; y: number }, b: { x: number; y: number }): { tx: number; ty: number; ok: boolean }[] {
+    const tiles = this.jumaTiles(a, b);
+    const cost = BUILDING_DEFS.juma.cost;
+    let credits = this.world.players[0].credits;
+    let usedReady = this.world.players[0].readyBuilding === 'juma';
+    const placed: { tx: number; ty: number }[] = [];
+    const near = (tx: number, ty: number): boolean => {
+      if (this.world.nearOwnBase(0, tx + 0.5, ty + 0.5, 9)) return true;
+      for (const p of placed) {
+        const dx = p.tx - tx;
+        const dy = p.ty - ty;
+        if (dx * dx + dy * dy <= 81) return true;
+      }
+      return false;
+    };
+    return tiles.map((t) => {
+      const ok = this.world.footprintFree(t.tx, t.ty, 1, 1) && near(t.tx, t.ty) && (usedReady || credits >= cost);
+      if (ok) {
+        if (usedReady) usedReady = false;
+        else credits -= cost;
+        placed.push(t);
+      }
+      return { tx: t.tx, ty: t.ty, ok };
+    });
+  }
+
+  private finishWall(p: { x: number; y: number }): void {
+    if (!this.wallDrag) return;
+    const cells = this.previewWall(this.wallDrag, p);
+    const tiles: { x: number; y: number }[] = [];
+    for (const c of cells) {
+      if (!c.ok) break;
+      tiles.push({ x: c.tx, y: c.ty });
+    }
+    this.renderer.wallCells = null;
+    this.renderer.ghost = null;
+    if (tiles.length === 0) {
+      this.hud.toast('这一排放不下');
+      return;
+    }
+    this.world.enqueue({ c: 'placeWall', kind: 'juma', tiles });
+    this.placing = null;
+    this.hud.toast(tiles.length > 1 ? `拒马连成 ${tiles.length} 段` : '拒马已放下');
     this.hud.refresh();
   }
 

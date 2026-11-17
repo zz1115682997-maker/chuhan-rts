@@ -5,6 +5,7 @@ import { T_DIRT, T_GRASS, T_ROCK, T_WATER } from '../sim/map.js';
 import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { World } from '../sim/world.js';
 import { isoX, isoY, screenToTile, tileDiamond, TILE_H, TILE_W } from './iso.js';
+import { sfxBoom, sfxBuilt, sfxShot } from '../ui/sfx.js';
 import type { TileCoord } from './iso.js';
 import { buildTextures, TERRAIN_COLOR } from './textures.js';
 import type { TextureSet } from './textures.js';
@@ -29,13 +30,20 @@ export class Renderer {
   selectionBuilding: number | null = null;
   marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
   ghost: { tx: number; ty: number; w: number; h: number; ok: boolean } | null = null;
+  wallCells: { tx: number; ty: number; ok: boolean }[] | null = null;
+  /** 红警目标线：每个单位连到自己当前的移动点或攻击目标。 */
+  orderLine: { x: number; y: number; tx: number; ty: number; attack: boolean }[] | null = null;
 
   private terrain = new Container();
+  private fog = new Graphics();
   private entities = new Container();
   private labels = new Container();
   private overlay = new Graphics();
   private screenOverlay = new Graphics();
   private unitSprites = new Map<number, Sprite>();
+  /** Last pose, so walk frames and facing don't flicker on the boundary. */
+  private unitPose = new Map<number, { x: number; y: number; flip: boolean; back: boolean }>();
+  private corpses: { spr: Sprite; life: number; flip: boolean }[] = [];
   private buildingSprites = new Map<number, Sprite>();
   private buildingLabels = new Map<number, Text>();
   private effects: Effect[] = [];
@@ -62,7 +70,7 @@ export class Renderer {
 
     this.world = new Container();
     this.entities.sortableChildren = true;
-    this.world.addChild(this.terrain, this.entities, this.labels, this.overlay);
+    this.world.addChild(this.terrain, this.fog, this.entities, this.labels, this.overlay);
     app.stage.addChild(this.world, this.screenOverlay);
 
     this.buildTerrain();
@@ -202,10 +210,16 @@ export class Renderer {
   // ------------------------------------------------------------- frame
 
   pushEvents(): void {
+    let shot = false;
     for (const e of this.sim.events) {
+      if (e.t === 'built' && e.owner === 0) sfxBuilt();
+      if (!this.sim.tileVisible(0, e.x, e.y)) continue;
       if (e.t === 'shot') {
+        if (!shot) sfxShot();
+        shot = true;
         this.effects.push({ kind: 'tracer', x: e.x, y: e.y, tx: e.tx, ty: e.ty, life: 0.12, max: 0.12 });
       } else if (e.t === 'die') {
+        sfxBoom();
         this.effects.push({ kind: 'boom', x: e.x, y: e.y, tx: e.x, ty: e.y, life: 0.45, max: 0.45 });
       }
     }
@@ -214,10 +228,12 @@ export class Renderer {
 
   draw(dt: number): void {
     this.applyCamera();
+    this.drawFog();
     this.syncUnits();
     this.syncBuildings();
     this.drawOverlay();
     this.drawMarquee();
+    this.updateCorpses(dt);
     this.updateEffects(dt);
   }
 
@@ -236,57 +252,120 @@ export class Renderer {
       .stroke({ width: 1.5, color: 0xa6ffc0, alpha: 0.95 });
   }
 
+  private drawFog(): void {
+    const g = this.fog;
+    g.clear();
+    const map = this.sim.map;
+    const S = map.size;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        if (this.sim.tileVisible(0, x, y)) continue;
+        const known = this.sim.tileExplored(0, x, y);
+        g.poly(tileDiamond(x, y)).fill({ color: 0x050806, alpha: known ? 0.58 : 1 });
+      }
+    }
+  }
+
   private syncUnits(): void {
     const seen = new Set<number>();
     for (const u of this.sim.units) {
+      if (!this.sim.unitVisible(0, u)) continue;
       seen.add(u.id);
+      const pose = this.unitPose.get(u.id);
+      const screenX = Math.cos(u.facing) - Math.sin(u.facing);
+      const screenY = Math.cos(u.facing) + Math.sin(u.facing);
+      let flip = pose?.flip ?? screenX < 0;
+      let back = pose?.back ?? screenY < 0;
+      if (screenX > 0.35) flip = false;
+      else if (screenX < -0.35) flip = true;
+      if (screenY > 0.35) back = false;
+      else if (screenY < -0.35) back = true;
+      const moved = pose ? Math.hypot(u.x - pose.x, u.y - pose.y) > 0.008 : false;
+      this.unitPose.set(u.id, { x: u.x, y: u.y, flip, back });
+
+      const heavy = u.kind === 'zhanche' || u.kind === 'zhuangche' || u.kind === 'weixiuche' || u.kind === 'grainCart';
+      const period = u.kind === 'qingqi' ? 160 : heavy ? 280 : 210;
+      const attacking = u.order === 'attack' && !moved && UNIT_DEFS[u.kind].weapon !== null;
+      const frame = attacking ? 2 : moved ? Math.floor(performance.now() / period) % 2 : 0;
+      const dir = back ? 'ne' : 'se';
+      const baked = this.tex.units.get(`${u.kind}:${u.owner}:${dir}:${frame}`);
+      if (!baked) continue;
+
       let spr = this.unitSprites.get(u.id);
       if (!spr) {
-        const baked = this.tex.units.get(`${u.kind}:${u.owner}`);
-        if (!baked) continue;
         spr = new Sprite(baked.texture);
-        spr.anchor.set(baked.ax, baked.ay);
-        spr.scale.set(1.15);
         this.entities.addChild(spr);
         this.unitSprites.set(u.id, spr);
       }
+      if (spr.texture !== baked.texture) spr.texture = baked.texture;
+      spr.anchor.set(baked.ax, baked.ay);
+      const s = 1.4;
+      spr.scale.set(flip ? -s : s, s);
       spr.position.set(isoX(u.x, u.y), isoY(u.x, u.y));
       spr.zIndex = u.x + u.y + 0.01;
     }
     for (const [id, spr] of this.unitSprites) {
       if (!seen.has(id)) {
-        spr.destroy();
+        const u = this.sim.unitById.get(id);
+        if (u && u.alive) spr.destroy();
+        else this.corpses.push({ spr, life: 0.42, flip: spr.scale.x < 0 });
         this.unitSprites.delete(id);
+        this.unitPose.delete(id);
       }
     }
+  }
+
+  private updateCorpses(dt: number): void {
+    const stay: { spr: Sprite; life: number; flip: boolean }[] = [];
+    for (const c of this.corpses) {
+      c.life -= dt;
+      if (c.life <= 0) {
+        c.spr.destroy();
+        continue;
+      }
+      const t = c.life / 0.42;
+      const s = 1.4 * (0.45 + 0.55 * t);
+      c.spr.alpha = t;
+      c.spr.scale.set(c.flip ? -s : s, s * (0.55 + 0.45 * t));
+      stay.push(c);
+    }
+    this.corpses = stay;
   }
 
   private syncBuildings(): void {
     const seen = new Set<number>();
     for (const b of this.sim.buildings) {
+      if (!this.sim.buildingVisible(0, b)) continue;
       seen.add(b.id);
+      const key = b.kind === 'juma' ? `juma:${b.owner}:${this.jumaMask(b)}` : `${b.kind}:${b.owner}`;
+      const baked = this.tex.buildings.get(key);
+      if (!baked) continue;
       let spr = this.buildingSprites.get(b.id);
       if (!spr) {
-        const baked = this.tex.buildings.get(`${b.kind}:${b.owner}`);
-        if (!baked) continue;
         spr = new Sprite(baked.texture);
         spr.anchor.set(baked.ax, baked.ay);
         spr.scale.set(0.92);
         this.entities.addChild(spr);
         this.buildingSprites.set(b.id, spr);
 
-        const label = new Text({
-          text: BUILDING_DEFS[b.kind].name,
-          style: {
-            fontFamily: 'Microsoft YaHei, PingFang SC, Noto Sans SC, sans-serif',
-            fontSize: 13,
-            fill: 0xefe6d2,
-            stroke: { color: 0x0b0f0c, width: 3 },
-          },
-        });
-        label.anchor.set(0.5, 0);
-        this.labels.addChild(label);
-        this.buildingLabels.set(b.id, label);
+        if (b.kind !== 'juma') {
+          const label = new Text({
+            text: BUILDING_DEFS[b.kind].name,
+            style: {
+              fontFamily: 'Microsoft YaHei, PingFang SC, Noto Sans SC, sans-serif',
+              fontSize: 13,
+              fill: 0xefe6d2,
+              stroke: { color: 0x0b0f0c, width: 3 },
+            },
+          });
+          label.anchor.set(0.5, 0);
+          this.labels.addChild(label);
+          this.buildingLabels.set(b.id, label);
+        }
+      }
+      if (spr.texture !== baked.texture) {
+        spr.texture = baked.texture;
+        spr.anchor.set(baked.ax, baked.ay);
       }
       spr.position.set(isoX(b.x, b.y), isoY(b.x, b.y));
       spr.zIndex = b.x + b.y - 0.01;
@@ -314,6 +393,27 @@ export class Renderer {
   private drawOverlay(): void {
     const g = this.overlay;
     g.clear();
+
+    if (this.orderLine) {
+      for (const line of this.orderLine) {
+        const ax = isoX(line.x, line.y);
+        const ay = isoY(line.x, line.y);
+        const bx = isoX(line.tx, line.ty);
+        const by = isoY(line.tx, line.ty);
+        const color = line.attack ? 0xff5d4a : 0x9dff6a;
+        g.moveTo(ax, ay).lineTo(bx, by).stroke({ width: 4, color: 0x101610, alpha: 0.75 });
+        g.moveTo(ax, ay).lineTo(bx, by).stroke({ width: 2, color, alpha: 0.95 });
+        g.circle(bx, by, 4.5).stroke({ width: 2, color, alpha: 0.95 });
+      }
+    }
+
+    if (this.wallCells) {
+      for (const cell of this.wallCells) {
+        const color = cell.ok ? 0x7ef2a0 : 0xff6b5a;
+        g.poly(tileDiamond(cell.tx, cell.ty)).fill({ color, alpha: 0.28 });
+        g.poly(tileDiamond(cell.tx, cell.ty)).stroke({ width: 1.5, color, alpha: 0.9 });
+      }
+    }
 
     // building placement preview
     if (this.ghost) {
@@ -371,17 +471,34 @@ export class Renderer {
 
     // health bars
     for (const u of this.sim.units) {
-      if (u.hp >= u.maxHp) continue;
-      this.healthBar(g, u.x, u.y, u.hp / u.maxHp, 26);
+      if (u.hp >= u.maxHp || !this.sim.unitVisible(0, u)) continue;
+      this.healthBar(g, u.x, u.y, u.hp / u.maxHp, 26, 54);
     }
     for (const b of this.sim.buildings) {
+      if (!this.sim.buildingVisible(0, b)) continue;
       this.healthBar(g, b.x, b.y, b.hp / b.maxHp, ((b.w + b.h) * TILE_W) / 4);
     }
   }
 
-  private healthBar(g: Graphics, x: number, y: number, ratio: number, width: number): void {
+  private jumaMask(b: { tx: number; ty: number; owner: number }): number {
+    const has = (tx: number, ty: number): boolean => {
+      for (const o of this.sim.buildings) {
+        if (!o.alive || o.kind !== 'juma' || o.owner !== b.owner) continue;
+        if (o.tx === tx && o.ty === ty) return true;
+      }
+      return false;
+    };
+    let mask = 0;
+    if (has(b.tx, b.ty - 1)) mask |= 1;
+    if (has(b.tx + 1, b.ty)) mask |= 2;
+    if (has(b.tx, b.ty + 1)) mask |= 4;
+    if (has(b.tx - 1, b.ty)) mask |= 8;
+    return mask;
+  }
+
+  private healthBar(g: Graphics, x: number, y: number, ratio: number, width: number, lift = 30): void {
     const cx = isoX(x, y);
-    const cy = isoY(x, y) - 30;
+    const cy = isoY(x, y) - lift;
     const w = width;
     const h = 4;
     g.rect(cx - w / 2, cy, w, h).fill({ color: 0x000000, alpha: 0.65 });
@@ -415,7 +532,7 @@ export class Renderer {
 function unitKindsFor(world: World): import('../sim/types.js').UnitKind[] {
   const set = new Set<import('../sim/types.js').UnitKind>();
   for (const u of world.units) set.add(u.kind);
-  for (const k of ['mcv', 'han_zu', 'han_nuge', 'han_wugang', 'chu_zidi', 'chu_qi', 'chu_chongche', 'grainCart'] as const) {
+  for (const k of ['mcv', 'scout', 'bingzu', 'qingqi', 'gongjiang', 'han_caiguan', 'chu_zidi', 'zhanche', 'zhuangche', 'weixiuche', 'grainCart'] as const) {
     set.add(k);
   }
   return [...set];

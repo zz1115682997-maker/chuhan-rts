@@ -5,15 +5,18 @@ export type Faction = 'han' | 'chu';
 
 export type UnitKind =
   | 'mcv'
-  | 'han_zu'
-  | 'han_nuge'
-  | 'han_wugang'
+  | 'scout'
+  | 'bingzu'
+  | 'qingqi'
+  | 'gongjiang'
+  | 'han_caiguan'
   | 'chu_zidi'
-  | 'chu_qi'
-  | 'chu_chongche'
+  | 'zhanche'
+  | 'zhuangche'
+  | 'weixiuche'
   | 'grainCart';
 
-export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang';
+export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang' | 'juma' | 'nutai' | 'xiankeng';
 
 export type Armor = 'infantry' | 'light' | 'heavy' | 'building';
 export type Warhead = 'blade' | 'bolt' | 'charge' | 'siege';
@@ -42,6 +45,8 @@ export interface Unit {
   targetUnit: number;
   targetBuilding: number;
   cooldown: number;
+  /** 侦察兵拆陷坑的已持续时间（秒）。 */
+  disarm: number;
   cargo: number;
   harvestTimer: number;
   repathTimer: number;
@@ -103,6 +108,9 @@ export type Command =
   | { c: 'cancelUnit' }
   | { c: 'cancelBuilding' }
   | { c: 'placeBuilding'; kind: BuildingKind; tx: number; ty: number }
+  | { c: 'placeWall'; kind: BuildingKind; tiles: { x: number; y: number }[] }
+  | { c: 'repair'; ids: number[]; building: number }
+  | { c: 'repairUnit'; ids: number[]; target: number }
   | { c: 'setRally'; id: number; x: number; y: number };
 
 export type SimEvent =

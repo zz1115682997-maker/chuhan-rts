@@ -11,7 +11,8 @@ export interface HudPort {
   refresh(): void;
 }
 
-const BUILDABLE: BuildingKind[] = ['bingying', 'canglin', 'chemafang'];
+const STRUCTURES: BuildingKind[] = ['bingying', 'canglin', 'chemafang'];
+const WORKS: BuildingKind[] = ['juma', 'nutai', 'xiankeng'];
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -49,6 +50,7 @@ export class Hud implements HudPort {
   constructor(world: World) {
     this.world = world;
     const root = document.getElementById('hud') as HTMLElement;
+    root.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // --- top bar
     const top = el('div', 'topbar', root);
@@ -93,48 +95,75 @@ export class Hud implements HudPort {
     });
     this.queueEl = el('div', 'queues', right);
 
-    // --- bottom panel
+    // --- bottom panel：建筑 / 工事 / 士兵 / 车辆
     const bottom = el('div', 'bottom', root);
-    const buildCol = el('div', 'col', bottom);
-    el('h4', undefined, buildCol).textContent = '建造';
-    const buildRow = el('div', 'btns', buildCol);
-    for (const kind of BUILDABLE) {
-      const def = BUILDING_DEFS[kind];
-      const b = el('button', 'btn', buildRow);
-      b.innerHTML = `<span class="nm">${def.name}</span><span class="cost">${def.cost}</span>`;
-      b.addEventListener('click', () => this.ctrl?.queueBuilding(kind));
-      this.buildBtns.set(kind, b);
-    }
+    const addBuildCol = (title: string, kinds: BuildingKind[]): HTMLElement => {
+      const col = el('div', 'col ' + (title === '建筑' ? 'build' : 'works'), bottom);
+      el('h4', undefined, col).textContent = title;
+      const row = el('div', 'btns', col);
+      for (const kind of kinds) {
+        const def = BUILDING_DEFS[kind];
+        const b = el('button', 'btn', row);
+        b.innerHTML = `<span class="nm">${def.name}</span><span class="cost">${def.cost}</span>`;
+        b.title = `${def.desc}。造好后左键放置，右键取消并全额退粮`;
+        b.addEventListener('click', () => this.ctrl?.queueBuilding(kind));
+        b.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault();
+          const ready = this.world.players[0].readyBuilding;
+          if (ready === kind || this.ctrl?.placing === kind) this.ctrl?.refundReady();
+        });
+        this.buildBtns.set(kind, b);
+      }
+      return row;
+    };
+    const buildRow = addBuildCol('建筑', STRUCTURES);
 
     this.placeBtn = el('button', 'btn place', buildRow);
-    this.placeBtn.innerHTML = '<span class="nm">放置建筑</span>';
+    this.placeBtn.innerHTML = '<span class="nm">放置</span>';
+    this.placeBtn.title = '放下已造好的建筑。右键取消并全额退粮';
     this.placeBtn.addEventListener('click', () => this.ctrl?.startPlacing());
+    this.placeBtn.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      this.ctrl?.refundReady();
+    });
 
     this.deployBtn = el('button', 'btn deploy', buildRow);
-    this.deployBtn.innerHTML = '<span class="nm">立旗扎营</span><span class="cost">F</span>';
+    this.deployBtn.innerHTML = '<span class="nm">立旗</span><span class="cost">F</span>';
     this.deployBtn.title = '选中军旗后按 F，就地立旗建营';
     this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
 
     this.sellBtn = el('button', 'btn sell', buildRow);
-    this.sellBtn.innerHTML = '<span class="nm">出售建筑</span><span class="cost">退 50%</span>';
+    this.sellBtn.innerHTML = '<span class="nm">出售</span><span class="cost">退 50%</span>';
     this.sellBtn.title = '选中已建成的建筑后出售';
     this.sellBtn.addEventListener('click', () => this.ctrl?.sellSelected());
 
-    const unitCol = el('div', 'col', bottom);
-    el('h4', undefined, unitCol).textContent = '兵种';
-    const unitRow = el('div', 'btns', unitCol);
-    const kinds: UnitKind[] =
-      fac === 'han'
-        ? ['han_zu', 'han_nuge', 'han_wugang', 'grainCart']
-        : ['chu_zidi', 'chu_qi', 'chu_chongche', 'grainCart'];
-    for (const kind of kinds) {
+    addBuildCol('工事', WORKS);
+
+    const soldierCol = el('div', 'col soldiers', bottom);
+    el('h4', undefined, soldierCol).textContent = '士兵';
+    const vehicleCol = el('div', 'col vehicles', bottom);
+    el('h4', undefined, vehicleCol).textContent = '车辆';
+    const soldierRow = el('div', 'btns', soldierCol);
+    const vehicleRow = el('div', 'btns', vehicleCol);
+    const soldiers: UnitKind[] = fac === 'chu'
+      ? ['scout', 'bingzu', 'qingqi', 'gongjiang', 'chu_zidi']
+      : ['scout', 'bingzu', 'qingqi', 'gongjiang', 'han_caiguan'];
+    const vehicles: UnitKind[] = ['zhanche', 'zhuangche', 'weixiuche', 'grainCart'];
+    const addUnit = (row: HTMLElement, kind: UnitKind): void => {
       const def = UNIT_DEFS[kind];
-      const b = el('button', 'btn', unitRow);
+      const b = el('button', 'btn', row);
       b.innerHTML = `<span class="nm">${def.name}</span><span class="cost">${def.cost}</span>`;
+      if (kind === 'chu_zidi' || kind === 'han_caiguan') b.classList.add('special');
       b.title = def.desc;
       b.addEventListener('click', () => this.ctrl?.queueUnit(kind));
+      b.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        this.ctrl?.cancelUnit();
+      });
       this.unitBtns.set(kind, b);
-    }
+    };
+    for (const kind of soldiers) addUnit(soldierRow, kind);
+    for (const kind of vehicles) addUnit(vehicleRow, kind);
 
     const infoCol = el('div', 'col grow', bottom);
     this.infoEl = el('div', 'info', infoCol);
@@ -179,7 +208,9 @@ export class Hud implements HudPort {
     for (const [kind, btn] of this.buildBtns) {
       const def = BUILDING_DEFS[kind as BuildingKind];
       const locked = !!def.requires && !this.world.hasBuilding(0, def.requires);
-      btn.disabled = p.credits < def.cost || locked || !!p.readyBuilding || !hasYard;
+      const isReady = p.readyBuilding === kind;
+      btn.disabled = !hasYard || (isReady ? false : locked || !!p.readyBuilding || p.credits < def.cost);
+      btn.classList.toggle('ready', isReady);
     }
     for (const [kind, btn] of this.unitBtns) {
       const def = UNIT_DEFS[kind as UnitKind];
@@ -226,9 +257,13 @@ export class Hud implements HudPort {
     if (p.readyBuilding) {
       const row = el('div', 'qready', this.queueEl);
       const txt = el('span', undefined, row);
-      txt.textContent = `${BUILDING_DEFS[p.readyBuilding].name} 已就绪 · 点击放置`;
+      txt.textContent = `${BUILDING_DEFS[p.readyBuilding].name} 已就绪 · 左键放置，右键取消`;
       txt.style.flex = '1';
       txt.addEventListener('click', () => this.ctrl?.startPlacing());
+      row.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        this.ctrl?.refundReady();
+      });
       const cancel = el('button', 'qx', row);
       cancel.textContent = '×';
       cancel.title = '取消并全额退款';
@@ -279,15 +314,19 @@ export class Hud implements HudPort {
         else if (t === 3) c = '#44444d';
         else if (t === 1) c = '#5b4b34';
         if (map.ore[map.idx(x, y)] > 0) c = '#8a7429';
+        if (!this.world.tileExplored(0, x, y)) c = '#070a08';
+        else if (!this.world.tileVisible(0, x, y)) c = '#1a221c';
         g.fillStyle = c;
         g.fillRect(x * step, y * step, step + 0.5, step + 0.5);
       }
     }
     for (const b of this.world.buildings) {
+      if (!this.world.buildingVisible(0, b)) continue;
       g.fillStyle = b.owner === 0 ? '#5b9bd5' : '#d15a4a';
       g.fillRect(b.tx * step, b.ty * step, b.w * step, b.h * step);
     }
     for (const u of this.world.units) {
+      if (!this.world.unitVisible(0, u)) continue;
       g.fillStyle = u.owner === 0 ? '#a8d4ff' : '#ff9a8a';
       g.fillRect(u.x * step - 1, u.y * step - 1, 2.5, 2.5);
     }

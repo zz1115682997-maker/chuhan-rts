@@ -1,13 +1,14 @@
 // The deterministic simulation core: fixed 20 Hz tick, no rendering, no DOM.
 // Everything in here is pure data + integer/float math so it can run headless.
 
-import { generateMap, PLAYER_BASE, AI_BASE } from './map.js';
+import { generateMap, PLAYER_BASE, AI_BASE, T_ROCK, T_WATER } from './map.js';
 import type { GameMap, MapKind } from './map.js';
 import { findPath, lineOfSight } from './path.js';
 import { Rng } from './rng.js';
 import {
   BUILDING_DEFS, UNIT_DEFS, DAMAGE_TABLE,
-  HARVEST_RATE, HARVEST_PER_TICK, GRAIN_VALUE, START_CREDITS, SELL_RATIO,
+  HARVEST_RATE, HARVEST_PER_TICK, GRAIN_VALUE, START_CREDITS, SELL_RATIO, DISARM_TIME, DISARM_RANGE,
+  REPAIR_PER_SECOND, REPAIR_VEHICLE_PER_SECOND,
 } from './stats.js';
 import type {
   Building, BuildingKind, BuildItem, Command, Faction, PlayerState, SimEvent, Unit, UnitKind, Vec,
@@ -32,6 +33,10 @@ export class World {
   tick = 0;
   state: 'playing' | 'won' | 'lost' = 'playing';
   events: SimEvent[] = [];
+  /** 当前看得见的格子，按下标是玩家。1 = 亮。 */
+  readonly visible: Uint8Array[];
+  /** 曾经看见过的格子。离开后仍记着地形。 */
+  readonly explored: Uint8Array[];
 
   private nextId = 1;
   private cmds: Command[] = [];
@@ -51,8 +56,40 @@ export class World {
       this.makePlayer(0, playerFaction),
       this.makePlayer(1, aiFaction),
     ];
+    const cells = this.map.size * this.map.size;
+    this.visible = [new Uint8Array(cells), new Uint8Array(cells)];
+    this.explored = [new Uint8Array(cells), new Uint8Array(cells)];
     this.setupBase(0, PLAYER_BASE.x, PLAYER_BASE.y);
     this.setupBase(1, AI_BASE.x, AI_BASE.y);
+    this.updateVision();
+  }
+
+  tileVisible(owner: number, x: number, y: number): boolean {
+    const tx = Math.floor(x);
+    const ty = Math.floor(y);
+    if (!this.map.inBounds(tx, ty)) return false;
+    return this.visible[owner][this.map.idx(tx, ty)] === 1;
+  }
+
+  tileExplored(owner: number, x: number, y: number): boolean {
+    const tx = Math.floor(x);
+    const ty = Math.floor(y);
+    if (!this.map.inBounds(tx, ty)) return false;
+    return this.explored[owner][this.map.idx(tx, ty)] === 1;
+  }
+
+  unitVisible(viewer: number, u: Unit): boolean {
+    return u.owner === viewer || this.tileVisible(viewer, u.x, u.y);
+  }
+
+  buildingVisible(viewer: number, b: Building): boolean {
+    if (b.owner === viewer) return true;
+    for (let y = b.ty; y < b.ty + b.h; y++) {
+      for (let x = b.tx; x < b.tx + b.w; x++) {
+        if (this.tileVisible(viewer, x, y)) return true;
+      }
+    }
+    return false;
   }
 
   attachAi(ai: AiHook): void {
@@ -108,10 +145,71 @@ export class World {
       if (u.alive) this.updateUnit(u, DT);
     }
     this.resolveCollisions();
+    this.updateDefenses();
     this.updateProduction();
     this.cleanup();
     this.checkVictory();
+    this.updateVision();
     if (this.ai) this.ai.update(this);
+  }
+
+  /** 每个单位和建筑按视野开图。山岩和河水挡住视线，挡住的那一格本身仍看得见。 */
+  private updateVision(): void {
+    for (let owner = 0; owner < this.visible.length; owner++) this.visible[owner].fill(0);
+    for (const u of this.units) {
+      if (!u.alive) continue;
+      this.reveal(u.owner, u.x, u.y, UNIT_DEFS[u.kind].sight);
+    }
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      this.reveal(b.owner, b.x, b.y, BUILDING_DEFS[b.kind].sight);
+    }
+  }
+
+  private reveal(owner: number, fx: number, fy: number, radius: number): void {
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const r = Math.ceil(radius);
+    const r2 = radius * radius;
+    const vis = this.visible[owner];
+    const exp = this.explored[owner];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r2) continue;
+        const x = x0 + dx;
+        const y = y0 + dy;
+        if (!this.map.inBounds(x, y)) continue;
+        if ((dx !== 0 || dy !== 0) && !this.sightReaches(x0, y0, x, y)) continue;
+        const i = this.map.idx(x, y);
+        vis[i] = 1;
+        exp[i] = 1;
+      }
+    }
+  }
+
+  private sightReaches(x0: number, y0: number, x1: number, y1: number): boolean {
+    let x = x0;
+    let y = y0;
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      if (x === x1 && y === y1) return true;
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+      if (x === x1 && y === y1) return true;
+      const t = this.map.terrainAt(x, y);
+      if (t === T_WATER || t === T_ROCK) return false;
+    }
   }
 
   // ---------------------------------------------------------------- commands
@@ -194,6 +292,15 @@ export class World {
       }
       case 'placeBuilding':
         this.tryPlaceBuilding(0, c.kind, c.tx, c.ty);
+        break;
+      case 'placeWall':
+        this.placeWall(0, c.kind, c.tiles);
+        break;
+      case 'repair':
+        this.orderRepair(c.ids, c.building);
+        break;
+      case 'repairUnit':
+        this.orderRepairUnit(c.ids, c.target);
         break;
       case 'setRally': {
         const b = this.buildingById.get(c.id);
@@ -364,17 +471,42 @@ export class World {
   tryPlaceBuilding(owner: number, kind: BuildingKind, tx: number, ty: number): boolean {
     const p = this.players[owner];
     const def = BUILDING_DEFS[kind];
-    if (!this.map.blockRectFree(tx, ty, def.w, def.h)) return false;
+    if (!this.footprintFree(tx, ty, def.w, def.h)) return false;
     if (!this.nearOwnBase(owner, tx + def.w / 2, ty + def.h / 2, 9)) return false;
     if (p.readyBuilding !== kind) return false;
     this.addBuildingAt(kind, owner, tx, ty);
     p.readyBuilding = null;
     // 仓廪落成时附赠一辆粮车
+    this.events.push({ t: 'built', x: tx + def.w / 2, y: ty + def.h / 2, owner });
     if (kind === 'canglin') {
       const spot = this.findSpawnSpot(tx + def.w / 2, ty + def.h / 2, 3);
       if (spot) this.spawnUnit('grainCart', owner, spot.x, spot.y);
     }
     return true;
+  }
+
+  /** 拒马连成一排。第一段用掉已经造好的那一座，后面的按造价现扣。 */
+  placeWall(owner: number, kind: BuildingKind, tiles: { x: number; y: number }[]): number {
+    const def = BUILDING_DEFS[kind];
+    const p = this.players[owner];
+    let placed = 0;
+    for (const t of tiles) {
+      if (placed >= 20) break;
+      if (p.readyBuilding === kind) {
+        if (!this.tryPlaceBuilding(owner, kind, t.x, t.y)) break;
+        placed++;
+        continue;
+      }
+      if (p.credits < def.cost) break;
+      if (!this.hasBuilding(owner, 'daying')) break;
+      if (!this.footprintFree(t.x, t.y, def.w, def.h)) break;
+      if (!this.nearOwnBase(owner, t.x + def.w / 2, t.y + def.h / 2, 9)) break;
+      p.credits -= def.cost;
+      this.addBuildingAt(kind, owner, t.x, t.y);
+      this.events.push({ t: 'built', x: t.x + def.w / 2, y: t.y + def.h / 2, owner });
+      placed++;
+    }
+    return placed;
   }
 
   nearOwnBase(owner: number, x: number, y: number, radius: number): boolean {
@@ -397,7 +529,7 @@ export class World {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const tx = Math.round(cx - def.w / 2 + dx);
           const ty = Math.round(cy - def.h / 2 + dy);
-          if (this.map.blockRectFree(tx, ty, def.w, def.h) && this.nearOwnBase(owner, tx + def.w / 2, ty + def.h / 2, 9)) {
+          if (this.footprintFree(tx, ty, def.w, def.h) && this.nearOwnBase(owner, tx + def.w / 2, ty + def.h / 2, 9)) {
             return { x: tx, y: ty };
           }
         }
@@ -417,7 +549,7 @@ export class World {
       rallyX: 0, rallyY: 0, hasRally: false,
       targetUnit: 0, targetBuilding: 0, cooldown: 0, alive: true,
     };
-    this.map.setOccupied(tx, ty, def.w, def.h, b.id);
+    if (def.blocks) this.map.setOccupied(tx, ty, def.w, def.h, b.id);
     this.buildings.push(b);
     this.buildingById.set(b.id, b);
     return b;
@@ -431,7 +563,7 @@ export class World {
       facing: owner === 0 ? Math.PI * 0.25 : Math.PI * 1.25,
       order: 'idle', path: [], pathI: 0,
       destX: NaN, destY: NaN,
-      targetUnit: 0, targetBuilding: 0, cooldown: 0,
+      targetUnit: 0, targetBuilding: 0, cooldown: 0, disarm: 0,
       cargo: 0, harvestTimer: 0, repathTimer: 0, stuckTimer: 0,
       lastX: x, lastY: y, alive: true, waypoints: [],
     };
@@ -471,6 +603,7 @@ export class World {
   private updateUnit(u: Unit, dt: number): void {
     const def = UNIT_DEFS[u.kind];
     if (u.cooldown > 0) u.cooldown -= dt;
+    if ((u.kind === 'gongjiang' || u.kind === 'weixiuche') && this.updateRepair(u, dt)) return;
 
     if (def.isHarvester) {
       // an explicit move order overrides the harvest loop until it finishes
@@ -508,10 +641,153 @@ export class World {
         }
       }
     } else {
-      this.acquireIfIdle(u);
+      if (UNIT_DEFS[u.kind].scout && u.order === 'idle') this.seekPit(u);
+      if (u.order === 'idle') this.acquireIfIdle(u);
     }
 
-    this.tryFire(u);
+    if (!this.channelDisarm(u, dt)) this.tryFire(u);
+  }
+
+  private orderRepair(ids: number[], building: number): void {
+    const b = this.buildingById.get(building);
+    if (!b || !b.alive) return;
+    for (const id of ids) {
+      const u = this.unitById.get(id);
+      if (!u || !u.alive || u.owner !== b.owner) continue;
+      if (u.kind !== 'gongjiang' && u.kind !== 'weixiuche') continue;
+      u.targetBuilding = building;
+      u.targetUnit = 0;
+      u.order = 'move';
+      u.path = [];
+      u.pathI = 0;
+      u.waypoints.length = 0;
+    }
+  }
+
+  /** 工匠修建筑，维修车修建筑或友军。没有修理任务时返回 false。 */
+  private updateRepair(u: Unit, dt: number): boolean {
+    if (u.kind === 'weixiuche' && u.targetUnit !== 0 && u.targetBuilding === 0) {
+      return this.healUnit(u, dt);
+    }
+    if (u.targetBuilding === 0) return false;
+    const b = this.buildingById.get(u.targetBuilding);
+    if (!b || !b.alive || b.owner !== u.owner) {
+      u.targetBuilding = 0;
+      return false;
+    }
+    if (b.hp >= b.maxHp) {
+      u.targetBuilding = 0;
+      u.order = 'idle';
+      u.path = [];
+      return true;
+    }
+    const rate = u.kind === 'weixiuche' ? REPAIR_VEHICLE_PER_SECOND : REPAIR_PER_SECOND;
+    // 用「到建筑矩形最近点的距离」判定，而不是到中心的距离：
+    // 3 格宽的建筑中心离最近可站立格有 2.0 格，用 1.7 格的阈值永远够不到。
+    const nx = Math.min(Math.max(u.x, b.tx), b.tx + b.w);
+    const ny = Math.min(Math.max(u.y, b.ty), b.ty + b.h);
+    const dist = Math.hypot(nx - u.x, ny - u.y);
+    if (dist > 1.2) {
+      this.stepToward(u, nx, ny, 1.15, dt);
+    } else {
+      b.hp = Math.min(b.maxHp, b.hp + rate * dt);
+    }
+    return true;
+  }
+
+  private healUnit(u: Unit, dt: number): boolean {
+    const t = this.unitById.get(u.targetUnit);
+    if (!t || !t.alive || t.owner !== u.owner || t.id === u.id) {
+      u.targetUnit = 0;
+      return false;
+    }
+    if (t.hp >= t.maxHp) {
+      u.targetUnit = 0;
+      u.order = 'idle';
+      return true;
+    }
+    this.stepToward(u, t.x, t.y, 1.5, dt);
+    if (Math.hypot(t.x - u.x, t.y - u.y) <= 1.5) {
+      t.hp = Math.min(t.maxHp, t.hp + REPAIR_VEHICLE_PER_SECOND * dt);
+    }
+    return true;
+  }
+
+  private stepToward(u: Unit, x: number, y: number, reach: number, dt: number): void {
+    const dx = x - u.x;
+    const dy = y - u.y;
+    const dist = Math.hypot(dx, dy);
+    u.facing = Math.atan2(dy, dx);
+    if (dist <= reach || dist <= 0.02) return;
+    const step = UNIT_DEFS[u.kind].speed * dt;
+    const scale = Math.min(step, dist - reach) / dist;
+    u.x += dx * Math.max(0, scale);
+    u.y += dy * Math.max(0, scale);
+  }
+
+  private orderRepairUnit(ids: number[], target: number): void {
+    const t = this.unitById.get(target);
+    if (!t || !t.alive) return;
+    for (const id of ids) {
+      const u = this.unitById.get(id);
+      if (!u || !u.alive || u.kind !== 'weixiuche' || u.owner !== t.owner || u.id === t.id) continue;
+      u.targetUnit = target;
+      u.targetBuilding = 0;
+      u.order = 'move';
+      u.path = [];
+      u.pathI = 0;
+      u.waypoints.length = 0;
+    }
+  }
+
+  /** 空闲的侦察兵会自己走向视野里的敌方陷坑。 */
+  private seekPit(u: Unit): void {
+    const def = UNIT_DEFS[u.kind];
+    let best = 0;
+    let bestD = def.sight * def.sight;
+    for (const b of this.buildings) {
+      if (!b.alive || b.owner === u.owner || b.kind !== 'xiankeng') continue;
+      const d = (b.x - u.x) ** 2 + (b.y - u.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = b.id;
+      }
+    }
+    if (best === 0) return;
+    u.order = 'attack';
+    u.targetBuilding = best;
+    u.targetUnit = 0;
+    u.destX = NaN;
+    u.destY = NaN;
+  }
+
+  /** 侦察兵贴着陷坑停留一会儿，坑消失，人还在。返回 true 表示这一拍不再普攻。 */
+  private channelDisarm(u: Unit, dt: number): boolean {
+    if (!UNIT_DEFS[u.kind].scout || u.targetBuilding === 0) {
+      u.disarm = 0;
+      return false;
+    }
+    const b = this.buildingById.get(u.targetBuilding);
+    if (!b || !b.alive || b.kind !== 'xiankeng' || b.owner === u.owner) {
+      u.disarm = 0;
+      return false;
+    }
+    const d = Math.hypot(b.x - u.x, b.y - u.y);
+    if (d > DISARM_RANGE) {
+      u.disarm = 0;
+      return false;
+    }
+    u.disarm += dt;
+    u.facing = Math.atan2(b.y - u.y, b.x - u.x);
+    if (u.disarm >= DISARM_TIME) {
+      b.alive = false;
+      this.events.push({ t: 'die', x: b.x, y: b.y, owner: b.owner });
+      u.disarm = 0;
+      u.targetBuilding = 0;
+      u.order = 'idle';
+      u.path = [];
+    }
+    return true;
   }
 
   private updateAttack(u: Unit, dt: number): void {
@@ -519,7 +795,8 @@ export class World {
     const tp = this.targetPos(u);
     if (tp) {
       const d = Math.hypot(tp.x - u.x, tp.y - u.y);
-      const range = def.weapon ? def.weapon.range : 1;
+      const pit = u.targetBuilding !== 0 && this.buildingById.get(u.targetBuilding)?.kind === 'xiankeng';
+      const range = def.scout && pit ? DISARM_RANGE : def.weapon ? def.weapon.range : 1;
       if (d > range * 0.9) {
         this.moveTo(u, tp.x, tp.y, dt);
       } else {
@@ -614,7 +891,8 @@ export class World {
     let bestB = 0;
     let bestDB = def.sight * def.sight;
     for (const b of this.buildings) {
-      if (!b.alive || b.owner === u.owner) continue;
+      if (!b.alive || b.owner === u.owner || !BUILDING_DEFS[b.kind].targetable) continue;
+      if (b.kind === 'xiankeng') continue;
       const d = (b.x - u.x) ** 2 + (b.y - u.y) ** 2;
       if (d < bestDB) {
         bestDB = d;
@@ -654,7 +932,7 @@ export class World {
   damageBuilding(id: number, dmg: number, warhead: keyof typeof DAMAGE_TABLE): void {
     const b = this.buildingById.get(id);
     if (!b || !b.alive) return;
-    const mult = DAMAGE_TABLE[warhead].building;
+    const mult = DAMAGE_TABLE[warhead].building * BUILDING_DEFS[b.kind].taken;
     b.hp -= dmg * mult;
     this.events.push({ t: 'hit', x: b.x, y: b.y, owner: b.owner });
     if (b.hp <= 0) {
@@ -662,6 +940,64 @@ export class World {
       this.map.clearOccupied(b.tx, b.ty, b.w, b.h);
       this.events.push({ t: 'die', x: b.x, y: b.y, owner: b.owner });
     }
+  }
+
+  // ---------------------------------------------------------------- defenses
+
+  /** 占地没被地形、别的建筑挡住。陷坑不写入 occupied，所以要单独查重叠。 */
+  footprintFree(tx: number, ty: number, w: number, h: number): boolean {
+    if (!this.map.blockRectFree(tx, ty, w, h)) return false;
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      if (tx < b.tx + b.w && tx + w > b.tx && ty < b.ty + b.h && ty + h > b.ty) return false;
+    }
+    return true;
+  }
+
+  private updateDefenses(): void {
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      const def = BUILDING_DEFS[b.kind];
+      if (def.weapon && b.alive) this.fireTower(b, def.weapon);
+    }
+  }
+
+  /** 弩台自己占着地，视线从占地外一圈的可走格子算起。 */
+  private towerSees(b: Building, tx: number, ty: number): boolean {
+    const x1 = Math.floor(tx);
+    const y1 = Math.floor(ty);
+    for (let y = b.ty - 1; y <= b.ty + b.h; y++) {
+      for (let x = b.tx - 1; x <= b.tx + b.w; x++) {
+        const inside = x >= b.tx && x < b.tx + b.w && y >= b.ty && y < b.ty + b.h;
+        if (inside || !this.map.passable(x, y)) continue;
+        if (lineOfSight(this.map, x, y, x1, y1)) return true;
+      }
+    }
+    return false;
+  }
+
+  private fireTower(b: Building, weapon: { range: number; damage: number; cooldown: number; warhead: 'blade' | 'bolt' | 'charge' | 'siege' }): void {
+    if (b.cooldown > 0) {
+      b.cooldown -= DT;
+      return;
+    }
+    let best = 0;
+    let bestD = weapon.range * weapon.range;
+    for (const u of this.units) {
+      if (!u.alive || u.owner === b.owner) continue;
+      const d = (u.x - b.x) ** 2 + (u.y - b.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = u.id;
+      }
+    }
+    if (best === 0) return;
+    const target = this.unitById.get(best);
+    if (!target) return;
+    if (!this.towerSees(b, target.x, target.y)) return;
+    b.cooldown = weapon.cooldown;
+    this.events.push({ t: 'shot', x: b.x, y: b.y, tx: target.x, ty: target.y, owner: b.owner, kind: weapon.warhead });
+    this.damageUnit(best, weapon.damage, weapon.warhead);
   }
 
   // ---------------------------------------------------------------- harvesters

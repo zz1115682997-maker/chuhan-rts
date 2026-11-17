@@ -42,7 +42,17 @@ const yard = world.buildings.find((b) => b.owner === 0 && b.kind === 'daying');
 console.log('\nMCV deployed    :', !!yard);
 assert(!!yard, 'MCV must deploy into a construction yard');
 
-// --- 2) build a granary, which comes with a free grain cart -----------------
+// --- 2) 工匠必须能修 3 格宽的建筑（曾经的 bug：判定用到中心的距离，永远够不到） ---
+yard!.hp = 400;
+const gs = world.findSpawnSpot(yard!.x, yard!.y, 3);
+assert(!!gs, 'need a spawn spot for the repairer');
+const gj = world.spawnUnit('gongjiang', 0, gs!.x, gs!.y);
+world.enqueue({ c: 'repair', ids: [gj.id], building: yard!.id });
+run(world, 20 * 5);
+console.log('\nrepair 3x3 yard:', 400, '->', Math.round(yard!.hp));
+assert(yard!.hp > 400, 'gongjiang must be able to repair a 3x3 building');
+
+// --- 3) build a granary, which comes with a free grain cart -----------------
 world.enqueue({ c: 'queueBuilding', kind: 'canglin' });
 run(world, 5);
 console.log('granary queued :', world.players[0].buildingQueue.length === 1);
@@ -88,7 +98,7 @@ let maxUnits = 0;
 const TICKS = 20 * 60 * 5;
 for (let i = 0; i < TICKS; i++) {
   if (i % 60 === 0) {
-    const kind = (i / 60) % 2 === 0 ? 'han_zu' : 'han_nuge';
+    const kind = (i / 60) % 2 === 0 ? 'bingzu' : 'scout';
     world.enqueue({ c: 'queueUnit', kind });
   }
   world.step();

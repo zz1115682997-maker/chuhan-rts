@@ -100,10 +100,10 @@ export class AIController {
     );
   }
 
-  private carts(world: World): number {
+  private countKind(world: World, kind: UnitKind): number {
     let n = 0;
     for (const u of world.units) {
-      if (u.alive && u.owner === this.owner && UNIT_DEFS[u.kind].isHarvester) n++;
+      if (u.alive && u.owner === this.owner && u.kind === kind) n++;
     }
     return n;
   }
@@ -142,7 +142,7 @@ export class AIController {
     const faction = p.faction;
 
     if (
-      this.carts(world) < 2 &&
+      this.countKind(world, 'grainCart') < 2 &&
       world.hasBuilding(this.owner, 'chemafang') &&
       p.credits >= UNIT_DEFS.grainCart.cost
     ) {
@@ -152,8 +152,8 @@ export class AIController {
 
     const cycle: UnitKind[] =
       faction === 'han'
-        ? ['han_zu', 'han_zu', 'han_nuge', 'han_wugang']
-        : ['chu_zidi', 'chu_zidi', 'chu_qi', 'chu_chongche'];
+        ? ['bingzu', 'bingzu', 'qingqi', 'scout', 'han_caiguan', 'zhanche', 'zhuangche']
+        : ['bingzu', 'bingzu', 'qingqi', 'scout', 'chu_zidi', 'zhanche', 'zhuangche'];
 
     const start = world.tick % cycle.length;
     for (let i = 0; i < cycle.length; i++) {

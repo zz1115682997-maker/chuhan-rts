@@ -20,8 +20,8 @@ const MAP_SEEDS: Record<MapKind, number> = {
 };
 
 const FACTION_UNITS: Record<Faction, UnitKind[]> = {
-  han: ['han_zu', 'han_nuge', 'han_wugang'],
-  chu: ['chu_zidi', 'chu_qi', 'chu_chongche'],
+  han: ['scout', 'bingzu', 'qingqi', 'gongjiang', 'han_caiguan', 'zhanche', 'zhuangche', 'weixiuche', 'grainCart'],
+  chu: ['scout', 'bingzu', 'qingqi', 'gongjiang', 'chu_zidi', 'zhanche', 'zhuangche', 'weixiuche', 'grainCart'],
 };
 
 const THUMB = 132;

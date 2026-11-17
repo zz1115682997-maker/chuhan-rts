@@ -129,7 +129,7 @@ async function runSelfTest(world: World, renderer: Renderer, ctrl: Controller): 
     if (base) {
       for (let i = 0; i < 3; i++) {
         const s = world.findSpawnSpot(base.x, base.y, 4);
-        if (s) world.spawnUnit('han_zu', 0, s.x, s.y);
+        if (s) world.spawnUnit('bingzu', 0, s.x, s.y);
       }
       pump(3);
     }
