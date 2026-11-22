@@ -409,8 +409,8 @@ export class Renderer {
       const spr = new Sprite(tex);
       spr.anchor.set(0.5, 1);
       spr.position.set(isoX(d.x + 0.5, d.y + 0.5), isoY(d.x + 0.5, d.y + 0.5) + 6);
-      spr.zIndex = d.x + d.y + 0.9;
-      this.entities.addChild(spr);
+      // 装饰属于地形层：放在 terrain 里才会被迷雾盖住，进 entities 会在未探明区露出来
+      this.terrain.addChild(spr);
     }
   }
 
