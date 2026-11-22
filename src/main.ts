@@ -18,6 +18,7 @@ async function boot(): Promise<void> {
 
   const params = new URLSearchParams(location.search);
   const auto = params.has('auto');
+  const sandbox = params.has('sandbox');
   const setup = auto
     ? {
         playerFaction: (params.get('faction') === 'chu' ? 'chu' : 'han') as 'han' | 'chu',
@@ -28,7 +29,9 @@ async function boot(): Promise<void> {
     : await showMenu();
 
   const world = new World(setup.seed, setup.playerFaction, setup.aiFaction, setup.mapKind);
-  world.attachAi(new AIController(1));
+  const ai = new AIController(1);
+  if (sandbox) ai.setPassive(true);
+  world.attachAi(ai);
 
   const renderer = await Renderer.create(host, world);
   const hud = new Hud(world);
@@ -62,6 +65,8 @@ async function boot(): Promise<void> {
         acc -= DT;
         steps++;
       }
+      // 测试模式：钱管够，只看东西能不能造出来、长得对不对
+      if (sandbox) world.players[0].credits = 50000;
     } else if (!over) {
       over = true;
       ctrl.setGameOver(world.state === 'won');

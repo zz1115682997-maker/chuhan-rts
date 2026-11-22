@@ -1,6 +1,7 @@
 // PixiJS presentation layer. Reads the simulation, never mutates it.
 
-import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Sprite, Text } from 'pixi.js';
+import type { Texture } from 'pixi.js';
 import { T_DIRT, T_GRASS, T_ROCK, T_WATER } from '../sim/map.js';
 import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { World } from '../sim/world.js';
@@ -36,6 +37,8 @@ export class Renderer {
 
   private terrain = new Container();
   private fog = new Graphics();
+  /** 外部立绘单位没有自带投影，影子单独画在这一层（在单位之下）。 */
+  private unitShadows = new Graphics();
   private entities = new Container();
   private labels = new Container();
   private overlay = new Graphics();
@@ -47,6 +50,7 @@ export class Renderer {
   private buildingSprites = new Map<number, Sprite>();
   private buildingLabels = new Map<number, Text>();
   private effects: Effect[] = [];
+  private walkFrames = location.search.includes('walk=1');
   private sim: World;
 
   static async create(canvasHost: HTMLElement, sim: World): Promise<Renderer> {
@@ -60,17 +64,107 @@ export class Renderer {
     });
     canvasHost.appendChild(app.canvas);
     app.canvas.style.display = 'block';
-    return new Renderer(app, sim);
+
+    // ?noart=1 退回全代码画法；?artscale=0.30 手动调屏幕高度。
+    const q = new URLSearchParams(location.search);
+    let art: Map<string, Texture[]> | undefined;
+    let artBack: Map<string, Texture> | undefined;
+    let bArt: Map<string, Texture> | undefined;
+    let artScale: number | undefined;
+    if (!q.has('noart')) {
+      try {
+        art = new Map<string, Texture[]>();
+        artBack = new Map<string, Texture>();
+        // 帧位固定：0 站立、1 迈步、2 攻击。缺哪张就回落到站立，索引不能错位。
+        const loadPair = async (kind: string, stand: string, walk?: string, atk?: string): Promise<void> => {
+          const pair: Texture[] = [await Assets.load(stand)];
+          if (walk) {
+            try {
+              pair.push(await Assets.load(walk));
+            } catch {
+              /* 缺迈步帧就退化成单帧 */
+            }
+          }
+          if (pair.length < 2) pair.push(pair[0]);
+          if (atk) {
+            try {
+              pair[2] = await Assets.load(atk);
+            } catch {
+              pair[2] = pair[0];
+            }
+          }
+          art!.set(kind, pair);
+        };
+        try {
+          await loadPair('bingzu', '/assets/units/bingzu_c.png', '/assets/units/bingzu_c_walk.png', '/assets/units/bingzu_c_atk.png');
+          await loadPair('scout', '/assets/units/scout.png', '/assets/units/scout_walk.png', '/assets/units/scout_atk.png');
+          await loadPair('gongjiang', '/assets/units/gongjiang.png', '/assets/units/gongjiang_walk.png', '/assets/units/gongjiang_atk.png');
+          await loadPair('han_caiguan', '/assets/units/han_caiguan.png', '/assets/units/han_caiguan_walk.png', '/assets/units/han_caiguan_atk.png');
+          await loadPair('chu_zidi', '/assets/units/chu_zidi.png', '/assets/units/chu_zidi_walk.png', '/assets/units/chu_zidi_atk.png');
+          await loadPair('qingqi', '/assets/units/qingqi.png', '/assets/units/qingqi_walk.png', '/assets/units/qingqi_atk.png');
+          await loadPair('grainCart', '/assets/units/grainCart_v.png');
+          await loadPair('zhanche', '/assets/units/zhanche_v.png');
+          await loadPair('zhuangche', '/assets/units/zhuangche_v.png');
+          await loadPair('weixiuche', '/assets/units/weixiuche_v.png');
+          await loadPair('mcv', '/assets/units/mcv_v.png');
+          const loadBack = async (kind: string, url: string): Promise<void> => {
+            try {
+              artBack!.set(kind, await Assets.load(url));
+            } catch {
+              /* 缺背面图就继续用正面 */
+            }
+          };
+          await loadBack('bingzu', '/assets/units/bingzu_c_back.png');
+          await loadBack('scout', '/assets/units/scout_back.png');
+          await loadBack('gongjiang', '/assets/units/gongjiang_back.png');
+          await loadBack('han_caiguan', '/assets/units/han_caiguan_back.png');
+          await loadBack('chu_zidi', '/assets/units/chu_zidi_back.png');
+          await loadBack('qingqi', '/assets/units/qingqi_back.png');
+        } catch (err) {
+          console.warn('[art] 部分立绘缺失，保留代码画法', err);
+        }
+        bArt = new Map<string, Texture>();
+        for (const k of ['nutai', 'canglin', 'daying', 'bingying', 'chemafang']) {
+          try {
+            bArt.set(k, await Assets.load(`/assets/units/${k}_art.png`));
+          } catch {
+            /* 缺图就退回代码画法 */
+          }
+        }
+        const ns = Number(q.get('artscale'));
+        if (Number.isFinite(ns) && ns > 0) artScale = ns;
+      } catch (err) {
+        console.warn('[art] 立绘加载失败，回退代码画法', err);
+        art = undefined;
+        bArt = undefined;
+      }
+    }
+
+    return new Renderer(app, sim, art, bArt, artScale, artBack);
   }
 
-  private constructor(app: Application, sim: World) {
+  private constructor(
+    app: Application,
+    sim: World,
+    art?: Map<string, Texture[]>,
+    buildingArt?: Map<string, Texture>,
+    artScale?: number,
+    backArt?: Map<string, Texture>,
+  ) {
     this.app = app;
     this.sim = sim;
-    this.tex = buildTextures(app.renderer, unitKindsFor(sim), 0);
+    this.tex = buildTextures(app.renderer, unitKindsFor(sim), 0, art, buildingArt, backArt);
+    if (artScale && art) {
+      for (const kind of art.keys()) {
+        for (const [k, b] of this.tex.units) {
+          if (k.startsWith(kind + ':')) b.scale = artScale;
+        }
+      }
+    }
 
     this.world = new Container();
     this.entities.sortableChildren = true;
-    this.world.addChild(this.terrain, this.fog, this.entities, this.labels, this.overlay);
+    this.world.addChild(this.terrain, this.fog, this.unitShadows, this.entities, this.labels, this.overlay);
     app.stage.addChild(this.world, this.screenOverlay);
 
     this.buildTerrain();
@@ -229,6 +323,7 @@ export class Renderer {
   draw(dt: number): void {
     this.applyCamera();
     this.drawFog();
+    this.drawUnitShadows();
     this.syncUnits();
     this.syncBuildings();
     this.drawOverlay();
@@ -266,6 +361,20 @@ export class Renderer {
     }
   }
 
+  private drawUnitShadows(): void {
+    const g = this.unitShadows;
+    g.clear();
+    for (const u of this.sim.units) {
+      if (!this.sim.unitVisible(0, u)) continue;
+      const baked = this.tex.units.get(`${u.kind}:${u.owner}:se:0`);
+      // 代码画的贴图自带影子，只有外部立绘需要补一层
+      if (!baked || !baked.scale) continue;
+      const cx = isoX(u.x, u.y);
+      const cy = isoY(u.x, u.y) + 4;
+      g.ellipse(cx, cy, 21 * baked.scale, 7.5 * baked.scale).fill({ color: 0x000000, alpha: 0.26 });
+    }
+  }
+
   private syncUnits(): void {
     const seen = new Set<number>();
     for (const u of this.sim.units) {
@@ -286,7 +395,10 @@ export class Renderer {
       const heavy = u.kind === 'zhanche' || u.kind === 'zhuangche' || u.kind === 'weixiuche' || u.kind === 'grainCart';
       const period = u.kind === 'qingqi' ? 160 : heavy ? 280 : 210;
       const attacking = u.order === 'attack' && !moved && UNIT_DEFS[u.kind].weapon !== null;
-      const frame = attacking ? 2 : moved ? Math.floor(performance.now() / period) % 2 : 0;
+      // 默认不切帧：两帧立绘的重心对不齐，切起来会闪。改用站立帧 + 轻微起伏。
+      // 想回到两帧走路动画，加 ?walk=1。
+      const frame = attacking ? 2 : this.walkFrames && moved ? Math.floor(performance.now() / period) % 2 : 0;
+      const bob = moved && !this.walkFrames ? Math.sin(performance.now() / (heavy ? 150 : 105)) * (heavy ? 0.9 : 1.6) : 0;
       const dir = back ? 'ne' : 'se';
       const baked = this.tex.units.get(`${u.kind}:${u.owner}:${dir}:${frame}`);
       if (!baked) continue;
@@ -299,9 +411,11 @@ export class Renderer {
       }
       if (spr.texture !== baked.texture) spr.texture = baked.texture;
       spr.anchor.set(baked.ax, baked.ay);
-      const s = 1.4;
+      const s = baked.scale ?? 1.4;
       spr.scale.set(flip ? -s : s, s);
-      spr.position.set(isoX(u.x, u.y), isoY(u.x, u.y));
+      spr.tint = baked.scale ? (u.owner === 0 ? 0x7fb3e0 : 0xe07a66) : 0xffffff;
+      // 立绘脚底在画布第 124 行，再往下压 3px 才有踩实感
+      spr.position.set(isoX(u.x, u.y), isoY(u.x, u.y) + (baked.scale ? 3 : 0) + bob);
       spr.zIndex = u.x + u.y + 0.01;
     }
     for (const [id, spr] of this.unitSprites) {
@@ -332,6 +446,21 @@ export class Renderer {
     this.corpses = stay;
   }
 
+  /** 屏幕坐标命中建筑：按精灵实际包围盒算，点屋顶也能选中，而不是只看地面格 */
+  buildingAt(sx: number, sy: number): number | null {
+    let best: number | null = null;
+    let bestZ = -Infinity;
+    for (const [id, spr] of this.buildingSprites) {
+      const r = spr.getBounds();
+      if (sx < r.x || sx > r.x + r.width || sy < r.y || sy > r.y + r.height) continue;
+      if (spr.zIndex > bestZ) {
+        bestZ = spr.zIndex;
+        best = id;
+      }
+    }
+    return best;
+  }
+
   private syncBuildings(): void {
     const seen = new Set<number>();
     for (const b of this.sim.buildings) {
@@ -344,7 +473,8 @@ export class Renderer {
       if (!spr) {
         spr = new Sprite(baked.texture);
         spr.anchor.set(baked.ax, baked.ay);
-        spr.scale.set(0.92);
+        spr.scale.set(baked.scale ?? 0.92);
+        if (baked.scale) spr.tint = b.owner === 0 ? 0xd2e2f2 : 0xf2d5cf;
         this.entities.addChild(spr);
         this.buildingSprites.set(b.id, spr);
 
@@ -367,7 +497,9 @@ export class Renderer {
         spr.texture = baked.texture;
         spr.anchor.set(baked.ax, baked.ay);
       }
-      spr.position.set(isoX(b.x, b.y), isoY(b.x, b.y));
+      // 立绘底边压在占地菱形的下顶点，比中心再低半格
+      const foot = baked.scale ? ((b.w + b.h) * TILE_H) / 4 : 0;
+      spr.position.set(isoX(b.x, b.y), isoY(b.x, b.y) + foot);
       spr.zIndex = b.x + b.y - 0.01;
 
       const label = this.buildingLabels.get(b.id);

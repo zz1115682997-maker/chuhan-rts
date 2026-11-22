@@ -76,14 +76,19 @@
       }
       .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; }
       .btn {
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-        min-width: 74px; min-height: 58px;
+        display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 7px;
+        min-width: 96px; min-height: 58px;
         background: linear-gradient(180deg, #34382c 0%, #1a201c 100%);
         border: 1px solid #6a6248; color: #f3ead6; border-radius: 2px;
-        padding: 6px 8px 5px; cursor: pointer; font-size: 14px; font-family: inherit;
+        padding: 5px 9px 5px 6px; cursor: pointer; font-size: 14px; font-family: inherit;
         box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
         transition: border-color .12s, transform .12s, background .12s;
       }
+      .btn .ico {
+        width: 40px; height: 40px; object-fit: contain; flex: none; display: block;
+        filter: drop-shadow(0 1px 1px rgba(0,0,0,.5));
+      }
+      .btn .txt { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
       .btn .nm { font-weight: 700; letter-spacing: 1px; line-height: 1.15; }
       .btn .cost { font-size: 11px; color: #e8c46a; letter-spacing: .5px; }
       .btn:hover:not(:disabled) {

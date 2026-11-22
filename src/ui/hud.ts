@@ -14,6 +14,32 @@ export interface HudPort {
 const STRUCTURES: BuildingKind[] = ['bingying', 'canglin', 'chemafang'];
 const WORKS: BuildingKind[] = ['juma', 'nutai', 'xiankeng'];
 
+// 底栏按钮图标直接用仓库里的立绘，少画一套图
+const ICON_SRC: Record<string, string> = {
+  bingzu: '/assets/units/bingzu_c.png',
+  scout: '/assets/units/scout.png',
+  qingqi: '/assets/units/qingqi.png',
+  gongjiang: '/assets/units/gongjiang.png',
+  han_caiguan: '/assets/units/han_caiguan.png',
+  chu_zidi: '/assets/units/chu_zidi.png',
+  zhanche: '/assets/units/zhanche_v.png',
+  zhuangche: '/assets/units/zhuangche_v.png',
+  weixiuche: '/assets/units/weixiuche_v.png',
+  grainCart: '/assets/units/grainCart_v.png',
+  mcv: '/assets/units/mcv_v.png',
+  nutai: '/assets/units/nutai_art.png',
+  canglin: '/assets/units/canglin_art.png',
+  bingying: '/assets/units/bingying_art.png',
+  chemafang: '/assets/units/chemafang_art.png',
+  daying: '/assets/units/daying_art.png',
+};
+
+function btnHtml(name: string, cost: string | number, icon?: string): string {
+  const ico = icon ? `<img class="ico" src="${icon}" alt="">` : '';
+  const extra = cost === '' ? '' : `<span class="cost">${cost}</span>`;
+  return `${ico}<span class="txt"><span class="nm">${name}</span>${extra}</span>`;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   cls?: string,
@@ -94,6 +120,15 @@ export class Hud implements HudPort {
       mmDrag = false;
     });
     this.queueEl = el('div', 'queues', right);
+    // 队列每 8 帧重建一次，按钮上的 click 会在按下瞬间被换掉，所以用委托，绑在不会被重建的外层
+    this.queueEl.addEventListener('click', (ev) => {
+      const t = ev.target as HTMLElement | null;
+      const act = t?.dataset?.act;
+      if (!act) return;
+      ev.stopPropagation();
+      if (act === 'unit') this.ctrl?.cancelUnit();
+      else if (act === 'build') this.ctrl?.cancelBuilding();
+    });
 
     // --- bottom panel：建筑 / 工事 / 士兵 / 车辆
     const bottom = el('div', 'bottom', root);
@@ -104,7 +139,7 @@ export class Hud implements HudPort {
       for (const kind of kinds) {
         const def = BUILDING_DEFS[kind];
         const b = el('button', 'btn', row);
-        b.innerHTML = `<span class="nm">${def.name}</span><span class="cost">${def.cost}</span>`;
+        b.innerHTML = btnHtml(def.name, def.cost, ICON_SRC[kind]);
         b.title = `${def.desc}。造好后左键放置，右键取消并全额退粮`;
         b.addEventListener('click', () => this.ctrl?.queueBuilding(kind));
         b.addEventListener('contextmenu', (ev) => {
@@ -119,7 +154,7 @@ export class Hud implements HudPort {
     const buildRow = addBuildCol('建筑', STRUCTURES);
 
     this.placeBtn = el('button', 'btn place', buildRow);
-    this.placeBtn.innerHTML = '<span class="nm">放置</span>';
+    this.placeBtn.innerHTML = btnHtml('放置', '');
     this.placeBtn.title = '放下已造好的建筑。右键取消并全额退粮';
     this.placeBtn.addEventListener('click', () => this.ctrl?.startPlacing());
     this.placeBtn.addEventListener('contextmenu', (ev) => {
@@ -128,12 +163,12 @@ export class Hud implements HudPort {
     });
 
     this.deployBtn = el('button', 'btn deploy', buildRow);
-    this.deployBtn.innerHTML = '<span class="nm">立旗</span><span class="cost">F</span>';
+    this.deployBtn.innerHTML = btnHtml('立旗', 'F', ICON_SRC.mcv);
     this.deployBtn.title = '选中军旗后按 F，就地立旗建营';
     this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
 
     this.sellBtn = el('button', 'btn sell', buildRow);
-    this.sellBtn.innerHTML = '<span class="nm">出售</span><span class="cost">退 50%</span>';
+    this.sellBtn.innerHTML = btnHtml('出售', '退 50%');
     this.sellBtn.title = '选中已建成的建筑后出售';
     this.sellBtn.addEventListener('click', () => this.ctrl?.sellSelected());
 
@@ -152,7 +187,7 @@ export class Hud implements HudPort {
     const addUnit = (row: HTMLElement, kind: UnitKind): void => {
       const def = UNIT_DEFS[kind];
       const b = el('button', 'btn', row);
-      b.innerHTML = `<span class="nm">${def.name}</span><span class="cost">${def.cost}</span>`;
+      b.innerHTML = btnHtml(def.name, def.cost, ICON_SRC[kind]);
       if (kind === 'chu_zidi' || kind === 'han_caiguan') b.classList.add('special');
       b.title = def.desc;
       b.addEventListener('click', () => this.ctrl?.queueUnit(kind));
@@ -181,7 +216,9 @@ export class Hud implements HudPort {
   // --------------------------------------------------------------- dynamic
 
   tick(): void {
-    this.creditsEl.textContent = `粮草 ${Math.round(this.world.players[0].credits)}`;
+    // 测试模式里粮草是硬补的，显示成 ∞ 免得看成"不增长"
+    if (location.search.includes('sandbox')) this.creditsEl.textContent = '粮草 ∞';
+    else this.creditsEl.textContent = `粮草 ${Math.round(this.world.players[0].credits)}`;
     const t = Math.floor(this.world.gameSeconds);
     const m = Math.floor(t / 60);
     const s = t % 60;
@@ -249,7 +286,8 @@ export class Hud implements HudPort {
         fill.style.width = `${Math.min(100, (it.progress / it.buildTime) * 100)}%`;
         const x = el('button', 'qx', row);
         x.textContent = '×';
-        x.addEventListener('click', onCancel);
+        x.dataset.act = label === '单位' ? 'unit' : 'build';
+        void onCancel;
       }
     };
     addQueue('单位', this.world.players[0].unitQueue as never, () => this.ctrl?.cancelUnit());
@@ -267,10 +305,7 @@ export class Hud implements HudPort {
       const cancel = el('button', 'qx', row);
       cancel.textContent = '×';
       cancel.title = '取消并全额退款';
-      cancel.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        this.ctrl?.cancelBuilding();
-      });
+      cancel.dataset.act = 'build';
     }
   }
 

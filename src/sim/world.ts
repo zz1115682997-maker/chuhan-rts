@@ -792,8 +792,9 @@ export class World {
 
   private updateAttack(u: Unit, dt: number): void {
     const def = UNIT_DEFS[u.kind];
-    const tp = this.targetPos(u);
-    if (tp) {
+    const tp0 = this.targetPos(u);
+    if (tp0) {
+      const tp = this.aimPoint(u, tp0);
       const d = Math.hypot(tp.x - u.x, tp.y - u.y);
       const pit = u.targetBuilding !== 0 && this.buildingById.get(u.targetBuilding)?.kind === 'xiankeng';
       const range = def.scout && pit ? DISARM_RANGE : def.weapon ? def.weapon.range : 1;
@@ -902,11 +903,26 @@ export class World {
     if (bestB !== 0) u.targetBuilding = bestB;
   }
 
+  /** 打建筑时瞄准的是矩形最近边，不是被建筑自己占着的中心格 */
+  private aimPoint(u: Unit, tp: Vec): Vec {
+    if (u.targetBuilding !== 0) {
+      const b = this.buildingById.get(u.targetBuilding);
+      if (b) {
+        return {
+          x: Math.min(Math.max(u.x, b.tx), b.tx + b.w),
+          y: Math.min(Math.max(u.y, b.ty), b.ty + b.h),
+        };
+      }
+    }
+    return tp;
+  }
+
   private tryFire(u: Unit): void {
     const def = UNIT_DEFS[u.kind];
     if (!def.weapon || u.cooldown > 0) return;
-    const tp = this.targetPos(u);
-    if (!tp) return;
+    const tp0 = this.targetPos(u);
+    if (!tp0) return;
+    const tp = this.aimPoint(u, tp0);
     const d = Math.hypot(tp.x - u.x, tp.y - u.y);
     if (d > def.weapon.range) return;
     if (!lineOfSight(this.map, Math.floor(u.x), Math.floor(u.y), Math.floor(tp.x), Math.floor(tp.y))) return;
@@ -1013,8 +1029,11 @@ export class World {
         u.path = [];
         return;
       }
-      const d = Math.hypot(ref.x - u.x, ref.y - u.y);
-      if (d < 2.4) {
+      // 交付点取仓廪正门（南侧中点外侧），让粮车真的开过去，而不是贴着墙角交差
+      const gx = ref.tx + ref.w / 2;
+      const gy = ref.ty + ref.h + 0.6;
+      const d = Math.hypot(gx - u.x, gy - u.y);
+      if (d < 0.7) {
         u.path = [];
         u.pathI = 0;
         u.harvestTimer += dt;
@@ -1025,7 +1044,7 @@ export class World {
           u.order = 'harvest';
         }
       } else {
-        this.moveTo(u, ref.x, ref.y, dt);
+        this.moveTo(u, gx, gy, dt);
       }
       return;
     }

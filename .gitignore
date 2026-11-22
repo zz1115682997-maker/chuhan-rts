@@ -4,3 +4,5 @@ dist/
 .DS_Store
 .npm-cache/
 .npm-logs/
+# AI 原始大图（1536，仅作生成输入，成品在 assets/units 下）
+assets/**/*_raw.png

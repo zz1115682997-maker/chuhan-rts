@@ -31,6 +31,8 @@ export class Controller {
   private dragStart = { x: 0, y: 0 };
   private dragNow = { x: 0, y: 0 };
   private middleDrag = false;
+  private rightDown: { x: number; y: number } | null = null;
+  private rightDrag = false;
   private lastMouse = { x: 0, y: 0 };
   private edge = { x: 0, y: 0 };
   private lastClick = { time: 0, kind: '' };
@@ -72,7 +74,9 @@ export class Controller {
         return;
       }
       if (e.button === 2) {
-        this.rightClick(p.x, p.y);
+        // 右键：短按仍然是下令/取消，按住拖才当拖屏用
+        this.rightDown = p;
+        this.rightDrag = false;
         return;
       }
       if (this.placing === 'juma') {
@@ -100,6 +104,21 @@ export class Controller {
         this.dragStart = p;
         return;
       }
+      if (this.rightDown) {
+        if (!this.rightDrag) {
+          const dx = p.x - this.rightDown.x;
+          const dy = p.y - this.rightDown.y;
+          if (dx * dx + dy * dy > 36) {
+            this.rightDrag = true;
+            this.dragStart = this.rightDown;
+          }
+        }
+        if (this.rightDrag) {
+          this.renderer.panScreen(p.x - this.dragStart.x, p.y - this.dragStart.y);
+          this.dragStart = p;
+          return;
+        }
+      }
       if (this.dragging) this.dragNow = p;
       this.updateGhost();
     });
@@ -108,6 +127,13 @@ export class Controller {
       const p = { x: e.offsetX, y: e.offsetY };
       if (this.middleDrag) {
         this.middleDrag = false;
+        return;
+      }
+      if (e.button === 2) {
+        const wasDrag = this.rightDrag;
+        this.rightDown = null;
+        this.rightDrag = false;
+        if (!wasDrag) this.rightClick(p.x, p.y);
         return;
       }
       if (e.button === 0 && this.wallDrag) {
@@ -198,6 +224,8 @@ export class Controller {
       this.spaceDown = false;
       this.middleDrag = false;
       this.dragging = false;
+      this.rightDown = null;
+      this.rightDrag = false;
     });
   }
 
@@ -369,6 +397,16 @@ export class Controller {
       sfxOrder();
       return;
     }
+    // 单位没点中，再按屏幕包围盒点建筑——建筑立绘很高，点屋顶会落到地面上方，光看格子会漏
+    const bid = this.renderer.buildingAt(sx, sy);
+    if (bid !== null) {
+      const eb = this.world.buildingById.get(bid);
+      if (eb && eb.alive && eb.owner !== 0 && this.world.buildingVisible(0, eb)) {
+        this.world.enqueue({ c: 'attackTarget', ids, targetUnit: 0, targetBuilding: eb.id });
+        sfxOrder();
+        return;
+      }
+    }
     if (shift) {
       this.world.enqueue({ c: 'queueMove', ids, x: t.x, y: t.y });
       sfxOrder();
@@ -413,6 +451,14 @@ export class Controller {
         targetBuilding: enemy.buildingId,
       });
       return;
+    }
+    const bid = this.renderer.buildingAt(sx, sy);
+    if (bid !== null) {
+      const eb = this.world.buildingById.get(bid);
+      if (eb && eb.alive && eb.owner !== 0 && this.world.buildingVisible(0, eb)) {
+        this.world.enqueue({ c: 'attackTarget', ids, targetUnit: 0, targetBuilding: eb.id });
+        return;
+      }
     }
     if (this.attackMode) {
       this.world.enqueue({ c: 'attackMove', ids, x: t.x, y: t.y });

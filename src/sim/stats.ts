@@ -164,7 +164,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   nutai: {
     kind: 'nutai', name: '弩台', cost: 800, buildTime: 10, hp: 640, w: 2, h: 2,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0,
-    weapon: { range: 6.2, damage: 26, cooldown: 1.5, warhead: 'bolt' }, sight: 8, taken: 1,
+    weapon: { range: 6.2, damage: 34, cooldown: 1.3, warhead: 'bolt' }, sight: 8, taken: 1,
     hotkey: '5', desc: '固定弩台，自动射击附近敌人',
   },
   xiankeng: {
@@ -177,7 +177,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
 // warhead -> armor damage multiplier. This table is the rock-paper-scissors.
 export const DAMAGE_TABLE: Record<Warhead, Record<Armor, number>> = {
   // 刀剑/长矛 — 杀步兵高效，打不动重甲
-  blade: { infantry: 1.0, light: 0.85, heavy: 0.22, building: 0.12 },
+  blade: { infantry: 1.0, light: 0.85, heavy: 0.22, building: 0.3 },
   // 弩矢 — 破甲，是重甲的天敌，对人也不错
   bolt: { infantry: 0.9, light: 0.6, heavy: 0.85, building: 0.2 },
   // 冲锋 — 屠杀步兵，对轻甲强，怕结阵重甲

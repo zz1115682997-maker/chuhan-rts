@@ -22,7 +22,15 @@ export interface Baked {
   texture: Texture;
   ax: number;
   ay: number;
+  /** 覆盖默认 1.4 缩放；PNG 立绘按自己的像素高度换算屏幕尺寸。 */
+  scale?: number;
 }
+
+/** 外部立绘的画布规格：128px 方图，脚底压在第 124 行。 */
+export const ART_CANVAS = 128;
+export const ART_FOOT_Y = 124;
+/** 128px 画布 -> zoom=1 时约 92px 屏幕高（人约 72px，约一格高）。可用 ?artscale= 调。 */
+export const ART_SCALE = 72 / ART_CANVAS;
 
 export interface TextureSet {
   units: Map<string, Baked>;
@@ -316,29 +324,41 @@ function drawJuma(mask: number): Container {
   const c = new Container();
   const g = new Graphics();
   g.rect(-30, -24, 60, 48).fill({ color: 0x000000, alpha: 0 });
-  const beams: Array<[number, number, number]> = [
+  // 四邻方向（等距菱形四条边的中点）
+  const dirs: Array<[number, number, number]> = [
     [1, 16, -8],
     [2, 16, 8],
     [4, -16, 8],
     [8, -16, -8],
   ];
-  if (mask === 0) {
-    g.ellipse(0, 8, 16, 5).fill({ color: 0x000000, alpha: 0.28 });
-    g.moveTo(-14, 8).lineTo(14, -16).stroke({ width: 5, color: 0x4a3218 });
-    g.moveTo(14, 8).lineTo(-14, -16).stroke({ width: 5, color: 0x4a3218 });
-    g.moveTo(-14, 8).lineTo(14, -16).stroke({ width: 2.4, color: WOOD });
-    g.moveTo(14, 8).lineTo(-14, -16).stroke({ width: 2.4, color: WOOD });
-    g.circle(0, -4, 2.6).fill(STEEL).stroke({ width: 1.2, color: INK });
-  } else {
-    g.ellipse(0, 6, 12, 4).fill({ color: 0x000000, alpha: 0.28 });
-    for (const [bit, hx, hy] of beams) {
-      if ((mask & bit) === 0) continue;
-      g.moveTo(0, 2).lineTo(hx, hy).stroke({ width: 8, color: 0x3a2814 });
-      g.moveTo(0, 2).lineTo(hx, hy).stroke({ width: 4.5, color: WOOD });
-    }
-    g.roundRect(-5, -4, 10, 10, 2).fill(WOOD).stroke({ width: 1.6, color: INK });
-    g.moveTo(-3, -2).lineTo(3, 4).stroke({ width: 1.4, color: STEEL });
+  const POST = 11;   // 立柱比横杆高
+  const BEAM = 6;    // 横杆离地高度
+  const DARKWOOD = 0x3a2814;
+
+  g.ellipse(0, 6, 18, 5).fill({ color: 0x000000, alpha: 0.26 });
+
+  // 与邻居连接的横杆 + 端柱，拼成一圈木栅栏
+  for (const [bit, hx, hy] of dirs) {
+    if ((mask & bit) === 0) continue;
+    const ex = hx, ey = hy;   // 端点正好落在邻格中心，拼起来不断缝
+    g.moveTo(0, BEAM).lineTo(ex, ey + BEAM).stroke({ width: 5, color: DARKWOOD });
+    g.moveTo(0, BEAM).lineTo(ex, ey + BEAM).stroke({ width: 3, color: WOOD });
+    g.moveTo(ex, ey).lineTo(ex, ey + POST).stroke({ width: 3.6, color: DARKWOOD });
+    g.moveTo(ex, ey).lineTo(ex, ey + POST).stroke({ width: 2, color: WOOD });
   }
+
+  // 中心立柱
+  g.moveTo(0, -POST + 4).lineTo(0, 6).stroke({ width: 3.6, color: DARKWOOD });
+  g.moveTo(0, -POST + 4).lineTo(0, 6).stroke({ width: 2, color: WOOD });
+
+  // 拒马本体的交叉尖木（哪怕连成墙也保留，保住"拒马"的身份）
+  g.moveTo(-11, 8).lineTo(11, -10).stroke({ width: 3.4, color: DARKWOOD });
+  g.moveTo(11, 8).lineTo(-11, -10).stroke({ width: 3.4, color: DARKWOOD });
+  g.moveTo(-11, 8).lineTo(11, -10).stroke({ width: 1.8, color: 0x9a733f });
+  g.moveTo(11, 8).lineTo(-11, -10).stroke({ width: 1.8, color: 0x9a733f });
+
+  if (mask === 0) g.ellipse(0, 7, 12, 4).fill({ color: 0x000000, alpha: 0.18 });
+
   c.addChild(g);
   return c;
 }
@@ -449,7 +469,14 @@ export const TERRAIN_COLOR = {
   ore: 0xb59a3c,
 };
 
-export function buildTextures(renderer: PixiRenderer, unitKinds: UnitKind[], owner: number): TextureSet {
+export function buildTextures(
+  renderer: PixiRenderer,
+  unitKinds: UnitKind[],
+  owner: number,
+  art?: Map<string, Texture[]>,
+  buildingArt?: Map<string, Texture>,
+  backArt?: Map<string, Texture>,
+): TextureSet {
   const units = new Map<string, Baked>();
   const buildings = new Map<string, Baked>();
   const icons = new Map<string, Baked>();
@@ -460,6 +487,43 @@ export function buildTextures(renderer: PixiRenderer, unitKinds: UnitKind[], own
         for (const frame of [0, 1, 2]) {
           const dir = back ? 'ne' : 'se';
           units.set(`${kind}:${side}:${dir}:${frame}`, bake(renderer, drawUnit(kind, side, frame, back)));
+        }
+      }
+    }
+  }
+
+  // 外部立绘覆盖：同一套图顶替所有朝向；帧按数组顺序取，缺帧时复用最后一张。
+  if (art) {
+    for (const [kind, frames] of art) {
+      if (!frames.length) continue;
+      // 攻击帧（2）：有专门出的攻击图就用它，没有才回落到站立帧。
+      const pick = (f: number) =>
+        f === 2 ? (frames[2] ?? frames[0]) : f === 1 && frames.length > 1 ? frames[1] : frames[0];
+      for (const side of [0, 1]) {
+        for (const dir of ['se', 'ne']) {
+          for (const frame of [0, 1, 2]) {
+            units.set(`${kind}:${side}:${dir}:${frame}`, {
+              texture: pick(frame),
+              ax: 0.5,
+              ay: ART_FOOT_Y / ART_CANVAS,
+              scale: ART_SCALE,
+            });
+          }
+        }
+      }
+    }
+  }
+  // 背面立绘：只顶替 ne 朝向（往左上走），se 继续用正面图，避免正脸倒着走。
+  if (backArt) {
+    for (const [kind, tex] of backArt) {
+      for (const side of [0, 1]) {
+        for (const frame of [0, 1, 2]) {
+          units.set(`${kind}:${side}:ne:${frame}`, {
+            texture: tex,
+            ax: 0.5,
+            ay: ART_FOOT_Y / ART_CANVAS,
+            scale: ART_SCALE,
+          });
         }
       }
     }
@@ -475,6 +539,20 @@ export function buildTextures(renderer: PixiRenderer, unitKinds: UnitKind[], own
     }
     buildings.set(`${kind}:0`, bake(renderer, drawBuilding(kind, 0)));
     buildings.set(`${kind}:1`, bake(renderer, drawBuilding(kind, 1)));
+  }
+  // 建筑立绘：图已按占地预对齐，底边压在画布底部往上 3px
+  if (buildingArt) {
+    for (const [kind, tex] of buildingArt) {
+      if (kind === 'juma') continue;
+      for (const side of [0, 1]) {
+        buildings.set(`${kind}:${side}`, {
+          texture: tex,
+          ax: 0.5,
+          ay: 1 - 3 / tex.height,
+          scale: 1,
+        });
+      }
+    }
   }
   for (const kind of unitKinds) {
     icons.set(kind, bake(renderer, drawIcon(kind, owner)));
