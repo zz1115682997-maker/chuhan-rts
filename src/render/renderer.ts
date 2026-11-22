@@ -78,7 +78,7 @@ export class Renderer {
   static async create(canvasHost: HTMLElement, sim: World): Promise<Renderer> {
     const app = new Application();
     await app.init({
-      background: '#0d1210',
+      background: '#121a14',
       resizeTo: window,
       antialias: true,
       autoDensity: true,
@@ -254,8 +254,11 @@ export class Renderer {
           .poly([
             cx, cy - 10, cx + 18, cy, cx, cy + 10, cx - 18, cy,
           ])
-          .fill({ color: TERRAIN_COLOR.ore, alpha: 0.28 + Math.min(0.4, amount / 9000) });
-        ore.moveTo(cx - 8, cy - 2).lineTo(cx + 8, cy + 2).stroke({ width: 1.5, color: 0xd8c25a, alpha: 0.5 });
+          .fill({ color: TERRAIN_COLOR.ore, alpha: 0.14 + Math.min(0.16, amount / 9000 * 0.22) });
+        // 垄线隔一格才画一次，满格都画会碎成一地黄格子
+        if ((x + y) % 2 === 0) {
+          ore.moveTo(cx - 8, cy - 2).lineTo(cx + 8, cy + 2).stroke({ width: 1.5, color: 0xd8c25a, alpha: 0.32 });
+        }
       }
     }
     if (any) this.terrain.addChild(ore);
@@ -333,8 +336,8 @@ export class Renderer {
         if (map.ore[i] > 0 || map.occupied[i] !== 0) continue;
         const h = tileHash(x, y, 37);
         if (t === T_GRASS) {
-          if (h < 0.05) decos.push({ x, y, name: 'tree' });
-          else if (h < 0.068) decos.push({ x, y, name: 'stones' });
+          if (h < 0.04) decos.push({ x, y, name: 'tree' });
+          else if (h < 0.052) decos.push({ x, y, name: 'stones' });
           else if (
             h > 0.95 &&
             (terrainAt(x + 1, y) === T_WATER ||
@@ -350,8 +353,8 @@ export class Renderer {
             (terrainAt(x - 1, y) === T_ROCK ? 1 : 0) +
             (terrainAt(x, y + 1) === T_ROCK ? 1 : 0) +
             (terrainAt(x, y - 1) === T_ROCK ? 1 : 0);
-          if (nb >= 3 && h > 0.82) decos.push({ x, y, name: 'hill' });
-          else if (h > 0.76) decos.push({ x, y, name: 'stones' });
+          if (nb >= 3 && h > 0.9) decos.push({ x, y, name: 'hill' });
+          else if (h > 0.86) decos.push({ x, y, name: 'stones' });
         }
       }
     }
