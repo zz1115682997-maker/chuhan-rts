@@ -103,9 +103,9 @@ export class Renderer {
           await loadPair('chu_zidi', '/assets/units/chu_zidi.png', '/assets/units/chu_zidi_walk.png', '/assets/units/chu_zidi_atk.png');
           await loadPair('qingqi', '/assets/units/qingqi.png', '/assets/units/qingqi_walk.png', '/assets/units/qingqi_atk.png');
           await loadPair('grainCart', '/assets/units/grainCart_v.png');
-          await loadPair('zhanche', '/assets/units/zhanche_v.png');
-          await loadPair('zhuangche', '/assets/units/zhuangche_v.png');
-          await loadPair('weixiuche', '/assets/units/weixiuche_v.png');
+          await loadPair('zhanche', '/assets/units/zhanche_v.png', undefined, '/assets/units/zhanche_atk.png');
+          await loadPair('zhuangche', '/assets/units/zhuangche_v.png', undefined, '/assets/units/zhuangche_atk.png');
+          await loadPair('weixiuche', '/assets/units/weixiuche_v.png', undefined, '/assets/units/weixiuche_atk.png');
           await loadPair('mcv', '/assets/units/mcv_v.png');
           const loadBack = async (kind: string, url: string): Promise<void> => {
             try {

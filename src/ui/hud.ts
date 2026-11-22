@@ -72,6 +72,7 @@ export class Hud implements HudPort {
   private opBtn: HTMLButtonElement;
   private toastLife = 0;
   private frameCount = 0;
+  private activeTab = 'build';
 
   constructor(world: World) {
     this.world = world;
@@ -119,6 +120,8 @@ export class Hud implements HudPort {
     this.minimap.addEventListener('pointerup', () => {
       mmDrag = false;
     });
+    // --- 红警式右侧栏：小地图下面接建造面板，队列再接在下面
+    const panel = el('div', 'panel', right);
     this.queueEl = el('div', 'queues', right);
     // 队列每 8 帧重建一次，按钮上的 click 会在按下瞬间被换掉，所以用委托，绑在不会被重建的外层
     this.queueEl.addEventListener('click', (ev) => {
@@ -130,12 +133,38 @@ export class Hud implements HudPort {
       else if (act === 'build') this.ctrl?.cancelBuilding();
     });
 
-    // --- bottom panel：建筑 / 工事 / 士兵 / 车辆
+    // --- 底部只留选中信息条
     const bottom = el('div', 'bottom', root);
-    const addBuildCol = (title: string, kinds: BuildingKind[]): HTMLElement => {
-      const col = el('div', 'col ' + (title === '建筑' ? 'build' : 'works'), bottom);
-      el('h4', undefined, col).textContent = title;
-      const row = el('div', 'btns', col);
+
+    // --- 侧栏分类：四个标签横排，点哪个看哪组（红警式），不竖着摞
+    const tabsEl = el('div', 'tabs', panel);
+    const panesEl = el('div', 'panes', panel);
+    const actionsEl = el('div', 'actions', panel);
+    const TAB_DEFS: { key: string; label: string }[] = [
+      { key: 'build', label: '建筑' },
+      { key: 'works', label: '工事' },
+      { key: 'soldiers', label: '士兵' },
+      { key: 'vehicles', label: '车辆' },
+    ];
+    const tabBtns: Record<string, HTMLElement> = {};
+    const panes: Record<string, HTMLElement> = {};
+    const showTab = (key: string): void => {
+      for (const t of TAB_DEFS) {
+        panes[t.key].classList.toggle('active', t.key === key);
+        tabBtns[t.key].classList.toggle('active', t.key === key);
+      }
+      this.activeTab = key;
+    };
+    for (const t of TAB_DEFS) {
+      const b = el('button', 'tab', tabsEl);
+      b.textContent = t.label;
+      b.addEventListener('click', () => showTab(t.key));
+      tabBtns[t.key] = b;
+      panes[t.key] = el('div', 'pane', panesEl);
+    }
+
+    const addBuildCol = (paneKey: string, kinds: BuildingKind[]): HTMLElement => {
+      const row = el('div', 'btns', panes[paneKey]);
       for (const kind of kinds) {
         const def = BUILDING_DEFS[kind];
         const b = el('button', 'btn', row);
@@ -151,9 +180,9 @@ export class Hud implements HudPort {
       }
       return row;
     };
-    const buildRow = addBuildCol('建筑', STRUCTURES);
+    addBuildCol('build', STRUCTURES);
 
-    this.placeBtn = el('button', 'btn place', buildRow);
+    this.placeBtn = el('button', 'btn place', actionsEl);
     this.placeBtn.innerHTML = btnHtml('放置', '');
     this.placeBtn.title = '放下已造好的建筑。右键取消并全额退粮';
     this.placeBtn.addEventListener('click', () => this.ctrl?.startPlacing());
@@ -162,24 +191,20 @@ export class Hud implements HudPort {
       this.ctrl?.refundReady();
     });
 
-    this.deployBtn = el('button', 'btn deploy', buildRow);
+    this.deployBtn = el('button', 'btn deploy', actionsEl);
     this.deployBtn.innerHTML = btnHtml('立旗', 'F', ICON_SRC.mcv);
     this.deployBtn.title = '选中军旗后按 F，就地立旗建营';
     this.deployBtn.addEventListener('click', () => this.ctrl?.deploySelected());
 
-    this.sellBtn = el('button', 'btn sell', buildRow);
+    this.sellBtn = el('button', 'btn sell', actionsEl);
     this.sellBtn.innerHTML = btnHtml('出售', '退 50%');
     this.sellBtn.title = '选中已建成的建筑后出售';
     this.sellBtn.addEventListener('click', () => this.ctrl?.sellSelected());
 
-    addBuildCol('工事', WORKS);
+    addBuildCol('works', WORKS);
 
-    const soldierCol = el('div', 'col soldiers', bottom);
-    el('h4', undefined, soldierCol).textContent = '士兵';
-    const vehicleCol = el('div', 'col vehicles', bottom);
-    el('h4', undefined, vehicleCol).textContent = '车辆';
-    const soldierRow = el('div', 'btns', soldierCol);
-    const vehicleRow = el('div', 'btns', vehicleCol);
+    const soldierRow = el('div', 'btns', panes['soldiers']);
+    const vehicleRow = el('div', 'btns', panes['vehicles']);
     const soldiers: UnitKind[] = fac === 'chu'
       ? ['scout', 'bingzu', 'qingqi', 'gongjiang', 'chu_zidi']
       : ['scout', 'bingzu', 'qingqi', 'gongjiang', 'han_caiguan'];
@@ -199,6 +224,7 @@ export class Hud implements HudPort {
     };
     for (const kind of soldiers) addUnit(soldierRow, kind);
     for (const kind of vehicles) addUnit(vehicleRow, kind);
+    showTab('build');
 
     const infoCol = el('div', 'col grow', bottom);
     this.infoEl = el('div', 'info', infoCol);
