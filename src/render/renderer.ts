@@ -1,7 +1,6 @@
 // PixiJS presentation layer. Reads the simulation, never mutates it.
 
-import { Application, Assets, Container, Graphics, Sprite, Text } from 'pixi.js';
-import type { Texture } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { T_DIRT, T_GRASS, T_ROCK, T_WATER } from '../sim/map.js';
 import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { World } from '../sim/world.js';
@@ -21,6 +20,24 @@ interface Effect {
   max: number;
 }
 
+/** 读一张图，用于往 canvas 上烘焙地表。 */
+function loadImg(src: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error(src));
+    img.src = src;
+  });
+}
+
+/** 稳定的逐格伪随机，保证每次刷新同一格的花纹/装饰一致。 */
+function tileHash(x: number, y: number, salt: number): number {
+  let h = (x * 374761393 + y * 668265263 + salt * 1442695040) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
 export class Renderer {
   readonly app: Application;
   readonly world: Container;
@@ -36,6 +53,8 @@ export class Renderer {
   orderLine: { x: number; y: number; tx: number; ty: number; attack: boolean }[] | null = null;
 
   private terrain = new Container();
+  /** 纯色兜底层：真实地表烘焙好后淡出。 */
+  private flatTerrain: Graphics[] = [];
   private fog = new Graphics();
   /** 外部立绘单位没有自带投影，影子单独画在这一层（在单位之下）。 */
   private unitShadows = new Graphics();
@@ -47,6 +66,8 @@ export class Renderer {
   /** Last pose, so walk frames and facing don't flicker on the boundary. */
   private unitPose = new Map<number, { x: number; y: number; flip: boolean; back: boolean }>();
   private corpses: { spr: Sprite; life: number; flip: boolean }[] = [];
+  /** 攻击帧保持到什么时候（毫秒），避免贴身打建筑时帧间闪跳。 */
+  private atkHold = new Map<number, number>();
   private buildingSprites = new Map<number, Sprite>();
   private buildingLabels = new Map<number, Text>();
   private effects: Effect[] = [];
@@ -168,13 +189,14 @@ export class Renderer {
     this.world.addChild(this.terrain, this.fog, this.unitShadows, this.entities, this.labels, this.overlay);
     app.stage.addChild(this.world, this.screenOverlay);
 
-    this.buildTerrain();
+    this.buildTerrainFlat();
+    void this.buildTerrainArt();
     this.cam = { x: 24, y: 24 };
   }
 
   // ------------------------------------------------------------- terrain
 
-  private buildTerrain(): void {
+  private buildTerrainFlat(): void {
     const map = this.sim.map;
     const buckets = new Map<number, number[]>();
     const push = (color: number, poly: number[]) => {
@@ -204,6 +226,7 @@ export class Renderer {
         g.poly(pts.slice(i, i + 8)).fill({ color });
       }
       this.terrain.addChild(g);
+      this.flatTerrain.push(g);
     }
 
     // very subtle per-tile tint variation (cheap: batched fills, no per-tile strokes)
@@ -215,6 +238,7 @@ export class Renderer {
       }
     }
     this.terrain.addChild(tint);
+    this.flatTerrain.push(tint);
 
     // farmland (ore) patches
     const ore = new Graphics();
@@ -247,6 +271,131 @@ export class Renderer {
       }
     }
     this.terrain.addChild(waves);
+  }
+
+  /**
+   * 真实地表：把四张俯视纹理按格斜切烘焙成一张大图（一层 sprite，不占 draw call），
+   * 再在草地上撒树/石、岩区放石山、水边放芦苇。加载失败就安静退回纯色版本。
+   */
+  private async buildTerrainArt(): Promise<void> {
+    const map = this.sim.map;
+    const size = map.size;
+    const HW = TILE_W / 2;
+    const HH = TILE_H / 2;
+    const PAD = 180;
+    const cw = size * 2 * HW + PAD * 2;
+    const ch = size * 2 * HH + PAD * 2;
+    const cv = document.createElement('canvas');
+    cv.width = cw;
+    cv.height = ch;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#101511';
+    ctx.fillRect(0, 0, cw, ch);
+
+    const ver = '?v=t1';
+    const names = ['grass', 'dirt', 'water', 'rock'] as const;
+    let imgs: HTMLImageElement[];
+    try {
+      imgs = await Promise.all(names.map((n) => loadImg(`/assets/terrain/${n}.jpg${ver}`)));
+    } catch (err) {
+      console.warn('[terrain] 地表贴图缺失，保留纯色', err);
+      return;
+    }
+    const S = 56;
+    const maxOff = Math.max(1, imgs[0].width - S);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = map.idx(x, y);
+        const t = map.terrain[i];
+        let img = imgs[t] ?? imgs[0];
+        if (map.ore[i] > 0 && t !== T_WATER) img = imgs[1];
+        // 每格从纹理里随机抠一块，避免整张图反复出现同一个图案
+        const sx = Math.floor(tileHash(x, y, 11) * maxOff);
+        const sy = Math.floor(tileHash(x, y, 23) * maxOff);
+        const dx = PAD + size * HW + (x - y) * HW;
+        const dy = PAD + (x + y) * HH;
+        ctx.setTransform(HW / S, HH / S, -HW / S, HH / S, dx, dy);
+        ctx.drawImage(img, sx, sy, S, S, 0, 0, S, S);
+      }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // 装饰物选址
+    const terrainAt = (x: number, y: number): number =>
+      x >= 0 && y >= 0 && x < size && y < size ? map.terrain[map.idx(x, y)] : -1;
+    const decos: { x: number; y: number; name: 'tree' | 'stones' | 'hill' | 'reeds' }[] = [];
+    for (let y = 1; y < size - 1; y++) {
+      for (let x = 1; x < size - 1; x++) {
+        const i = map.idx(x, y);
+        const t = map.terrain[i];
+        if (map.ore[i] > 0 || map.occupied[i] !== 0) continue;
+        const h = tileHash(x, y, 37);
+        if (t === T_GRASS) {
+          if (h < 0.05) decos.push({ x, y, name: 'tree' });
+          else if (h < 0.068) decos.push({ x, y, name: 'stones' });
+          else if (
+            h > 0.95 &&
+            (terrainAt(x + 1, y) === T_WATER ||
+              terrainAt(x - 1, y) === T_WATER ||
+              terrainAt(x, y + 1) === T_WATER ||
+              terrainAt(x, y - 1) === T_WATER)
+          ) {
+            decos.push({ x, y, name: 'reeds' });
+          }
+        } else if (t === T_ROCK) {
+          const nb =
+            (terrainAt(x + 1, y) === T_ROCK ? 1 : 0) +
+            (terrainAt(x - 1, y) === T_ROCK ? 1 : 0) +
+            (terrainAt(x, y + 1) === T_ROCK ? 1 : 0) +
+            (terrainAt(x, y - 1) === T_ROCK ? 1 : 0);
+          if (nb >= 3 && h > 0.82) decos.push({ x, y, name: 'hill' });
+          else if (h > 0.76) decos.push({ x, y, name: 'stones' });
+        }
+      }
+    }
+
+    // 影子直接画进烘焙图，省一层 sprite
+    for (const d of decos) {
+      const cx = PAD + size * HW + (d.x - d.y) * HW;
+      const cy = PAD + (d.x + d.y + 1) * HH + 4;
+      const rx = d.name === 'tree' ? 26 : d.name === 'hill' ? 36 : 15;
+      const ry = rx * 0.34;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(8,14,10,0.24)';
+      ctx.fill();
+    }
+
+    const ground = new Sprite(Texture.from(cv));
+    ground.x = -(PAD + size * HW);
+    ground.y = -PAD;
+    this.terrain.addChildAt(ground, 0);
+    for (const g of this.flatTerrain) g.alpha = 0;
+
+    let texs: Record<string, Texture>;
+    try {
+      const [tree, stones, hill, reeds] = await Promise.all([
+        Assets.load(`/assets/terrain/tree.png${ver}`),
+        Assets.load(`/assets/terrain/stones.png${ver}`),
+        Assets.load(`/assets/terrain/hill.png${ver}`),
+        Assets.load(`/assets/terrain/reeds.png${ver}`),
+      ]);
+      texs = { tree, stones, hill, reeds };
+    } catch (err) {
+      console.warn('[terrain] 装饰贴图缺失，只保留地面', err);
+      return;
+    }
+    for (const d of decos) {
+      const tex = texs[d.name];
+      if (!tex) continue;
+      const spr = new Sprite(tex);
+      spr.anchor.set(0.5, 1);
+      spr.position.set(isoX(d.x + 0.5, d.y + 0.5), isoY(d.x + 0.5, d.y + 0.5) + 6);
+      spr.zIndex = d.x + d.y + 0.9;
+      this.entities.addChild(spr);
+    }
   }
 
   // ------------------------------------------------------------- camera
@@ -398,7 +547,11 @@ export class Renderer {
       const attacking = u.order === 'attack' && !moved && UNIT_DEFS[u.kind].weapon !== null;
       // 默认不切帧：两帧立绘的重心对不齐，切起来会闪。改用站立帧 + 轻微起伏。
       // 想回到两帧走路动画，加 ?walk=1。
-      const frame = attacking ? 2 : this.walkFrames && moved ? Math.floor(performance.now() / period) % 2 : 0;
+      // 攻击帧要滞回：贴身打建筑时位置微调会让 attacking 一帧真一帧假，切帧就抖。
+      const now = performance.now();
+      if (attacking) this.atkHold.set(u.id, now + 520);
+      const atk = (this.atkHold.get(u.id) ?? 0) > now;
+      const frame = atk ? 2 : this.walkFrames && moved ? Math.floor(now / period) % 2 : 0;
       const bob = moved && !this.walkFrames ? Math.sin(performance.now() / (heavy ? 150 : 105)) * (heavy ? 0.9 : 1.6) : 0;
       const dir = back ? 'ne' : 'se';
       const baked = this.tex.units.get(`${u.kind}:${u.owner}:${dir}:${frame}`);
@@ -426,6 +579,7 @@ export class Renderer {
         else this.corpses.push({ spr, life: 0.42, flip: spr.scale.x < 0 });
         this.unitSprites.delete(id);
         this.unitPose.delete(id);
+        this.atkHold.delete(id);
       }
     }
   }

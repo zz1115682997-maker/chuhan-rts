@@ -8,8 +8,10 @@ export interface WeaponDef {
   damage: number;
   cooldown: number;
   warhead: Warhead;
-  /** 溅射半径（格）。只有烽火台这类"范围打击"才填，命中点周围的单位吃 55% 伤害。 */
+  /** 溅射半径（格）。只有"范围打击"的武器才填，命中点周围的单位吃 55% 伤害。 */
   splash?: number;
+  /** 引燃：被命中的单位持续掉血。 */
+  burn?: { seconds: number; dps: number };
 }
 
 export interface UnitDef {
@@ -164,10 +166,10 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     hotkey: '4', desc: '可连成围墙。放下来之后按住拖动，一排一起放下',
   },
   nutai: {
-    kind: 'nutai', name: '弩台', cost: 800, buildTime: 10, hp: 640, w: 2, h: 2,
+    kind: 'nutai', name: '弩台', cost: 1200, buildTime: 12, hp: 560, w: 2, h: 2,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0,
-    weapon: { range: 6.2, damage: 34, cooldown: 1.3, warhead: 'bolt' }, sight: 8, taken: 1,
-    hotkey: '5', desc: '固定弩台，自动射击附近敌人',
+    weapon: { range: 9.5, damage: 70, cooldown: 2.0, warhead: 'bolt' }, sight: 12, taken: 1,
+    hotkey: '5', desc: '远程强弩，射程最远、单发最重，隔着老远一支一支扎穿重甲；射速慢，怕被贴脸',
   },
   xiankeng: {
     kind: 'xiankeng', name: '陷坑', cost: 120, buildTime: 3, hp: 50, w: 1, h: 1,
@@ -175,10 +177,11 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     hotkey: '6', desc: '看得见。攻击可以打掉。侦察兵靠近拆掉，自己还活着',
   },
   fengjiantai: {
-    kind: 'fengjiantai', name: '烽火台', cost: 1200, buildTime: 12, hp: 520, w: 1, h: 1,
+    kind: 'fengjiantai', name: '烽火台', cost: 700, buildTime: 9, hp: 620, w: 1, h: 1,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1,
-    weapon: { range: 9.5, damage: 100, cooldown: 3.2, warhead: 'charge', splash: 1.5 }, sight: 13,
-    hotkey: '7', desc: '远程蓄力一击，砸中还能波及一圈，一发打散步兵群。视野最远，但造价高、皮薄，怕撞城车',
+    weapon: { range: 5.0, damage: 20, cooldown: 0.6, warhead: 'charge', splash: 0.9, burn: { seconds: 3, dps: 7 } },
+    sight: 7,
+    hotkey: '7', desc: '近身喷火的小碉堡，射速快、扇面扫一圈，被烧到的兵会自己继续着火；射程短，够不着远处',
   },
 };
 

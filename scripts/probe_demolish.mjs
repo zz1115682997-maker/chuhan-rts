@@ -19,6 +19,11 @@ function boot(kind) {
 
 // 1) 塔拆建筑：把自家大营改成敌方（省得再放靶子），血调薄一点好观察
 const a = boot('fengjiantai');
+// 烽火台射程只有 5 格，先把它挪到自家大营旁边当靶场
+a.t.tx = a.yard.tx - 2;
+a.t.ty = a.yard.ty - 1;
+a.t.x = a.t.tx + 0.5;
+a.t.y = a.t.ty + 0.5;
 a.yard.owner = 1;
 a.yard.hp = 150;
 // 保一条命：不然 0 方只剩一座工事，会立刻判负、整局停更

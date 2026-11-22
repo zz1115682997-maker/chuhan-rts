@@ -585,7 +585,7 @@ export class World {
       destX: NaN, destY: NaN,
       targetUnit: 0, targetBuilding: 0, cooldown: 0, disarm: 0,
       cargo: 0, harvestTimer: 0, repathTimer: 0, stuckTimer: 0,
-      lastX: x, lastY: y, alive: true, waypoints: [],
+      lastX: x, lastY: y, alive: true, burnTime: 0, burnDps: 0, waypoints: [],
     };
     this.units.push(u);
     this.unitById.set(u.id, u);
@@ -622,6 +622,16 @@ export class World {
 
   private updateUnit(u: Unit, dt: number): void {
     const def = UNIT_DEFS[u.kind];
+    // 引燃：着火期间持续掉血，烧完自动熄
+    if (u.burnTime > 0) {
+      u.burnTime -= dt;
+      u.hp -= u.burnDps * dt;
+      if (u.hp <= 0) {
+        u.alive = false;
+        this.events.push({ t: 'die', x: u.x, y: u.y, owner: u.owner });
+        return;
+      }
+    }
     if (u.cooldown > 0) u.cooldown -= dt;
     if ((u.kind === 'gongjiang' || u.kind === 'weixiuche') && this.updateRepair(u, dt)) return;
 
@@ -1045,7 +1055,7 @@ export class World {
    * 口径是"凡是能开火的都能打一切能被打的目标"，撞城车不是唯一能拆家的。
    * 判距离一律用矩形最近边，和单位 aimPoint 保持同一套算法。
    */
-  private fireTower(b: Building, weapon: { range: number; damage: number; cooldown: number; warhead: 'blade' | 'bolt' | 'charge' | 'siege'; splash?: number }): void {
+  private fireTower(b: Building, weapon: { range: number; damage: number; cooldown: number; warhead: 'blade' | 'bolt' | 'charge' | 'siege'; splash?: number; burn?: { seconds: number; dps: number } }): void {
     if (b.cooldown > 0) {
       b.cooldown -= DT;
       return;
@@ -1067,13 +1077,23 @@ export class World {
       b.cooldown = weapon.cooldown;
       this.events.push({ t: 'shot', x: b.x, y: b.y, tx: target.x, ty: target.y, owner: b.owner, kind: weapon.warhead });
       this.damageUnit(best, weapon.damage, weapon.warhead);
+      if (weapon.burn) {
+        target.burnTime = weapon.burn.seconds;
+        target.burnDps = weapon.burn.dps;
+      }
       // 溅射：命中点周围一圈吃 55% 伤害，这是烽火台和弩台的根本区别（打散兵群 vs 逐个点杀）
       if (weapon.splash) {
         const r2 = weapon.splash * weapon.splash;
         for (const o of this.units) {
           if (!o.alive || o.owner === b.owner || o.id === best) continue;
           const dd = (o.x - target.x) ** 2 + (o.y - target.y) ** 2;
-          if (dd <= r2) this.damageUnit(o.id, weapon.damage * 0.55, weapon.warhead);
+          if (dd <= r2) {
+            this.damageUnit(o.id, weapon.damage * 0.55, weapon.warhead);
+            if (weapon.burn) {
+              o.burnTime = weapon.burn.seconds;
+              o.burnDps = weapon.burn.dps;
+            }
+          }
         }
       }
       return;

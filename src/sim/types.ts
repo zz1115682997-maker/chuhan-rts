@@ -54,6 +54,9 @@ export interface Unit {
   lastX: number;
   lastY: number;
   alive: boolean;
+  /** 引燃：剩余燃烧时间（秒）与每秒伤害，被烽火台喷到就会着火。 */
+  burnTime: number;
+  burnDps: number;
   /** 追加的路径点：走完当前目的地后依次前往 */
   waypoints: Vec[];
 }
