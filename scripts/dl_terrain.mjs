@@ -11,11 +11,11 @@ const items = [
   ['reeds', 'https://aka.doubaocdn.com/s/Km1Dh7awYf'],
 ];
 
-await mkdir('../assets/terrain/_raw', { recursive: true });
+await mkdir(new URL('../assets/terrain/_raw/', import.meta.url), { recursive: true });
 for (const [name, url] of items) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${name} ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(`../assets/terrain/_raw/${name}.png`, buf);
+  await writeFile(new URL(`../assets/terrain/_raw/${name}.png`, import.meta.url), buf);
   console.log(name, buf.length, 'bytes');
 }

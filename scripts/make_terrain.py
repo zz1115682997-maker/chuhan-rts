@@ -1,8 +1,9 @@
 from PIL import Image
 import os
 
-RAW = os.path.join('..', 'assets', 'terrain', '_raw')
-OUT = os.path.join('..', 'assets', 'terrain')
+BASE = os.path.dirname(os.path.abspath(__file__))
+RAW = os.path.join(BASE, '..', 'assets', 'terrain', '_raw')
+OUT = os.path.join(BASE, '..', 'assets', 'terrain')
 
 # 地表：统一缩到 320×320（用于 canvas 映射，平铺时看不出像素）
 for name in ['grass', 'dirt', 'water', 'rock']:

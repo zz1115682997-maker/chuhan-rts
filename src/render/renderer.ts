@@ -1,6 +1,6 @@
 // PixiJS presentation layer. Reads the simulation, never mutates it.
 
-import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
+import { Application, Assets, CanvasSource, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import { T_DIRT, T_GRASS, T_ROCK, T_WATER } from '../sim/map.js';
 import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
 import type { World } from '../sim/world.js';
@@ -190,7 +190,7 @@ export class Renderer {
     app.stage.addChild(this.world, this.screenOverlay);
 
     this.buildTerrainFlat();
-    void this.buildTerrainArt();
+    this.buildTerrainArt().catch((err) => console.warn('[terrain] 地表贴图加载失败，保留纯色', err));
     this.cam = { x: 24, y: 24 };
   }
 
@@ -368,10 +368,26 @@ export class Renderer {
       ctx.fill();
     }
 
-    const ground = new Sprite(Texture.from(cv));
-    ground.x = -(PAD + size * HW);
-    ground.y = -PAD;
-    this.terrain.addChildAt(ground, 0);
+    // 一张 3072×1536 的纹理在部分显卡上会超过 max texture size，切成 1024 的块更保险
+    const OFF_X = -(PAD + size * HW);
+    const OFF_Y = -PAD;
+    const CHUNK = 1024;
+    let slot = 0;
+    for (let sy = 0; sy < ch; sy += CHUNK) {
+      for (let sx = 0; sx < cw; sx += CHUNK) {
+        const w = Math.min(CHUNK, cw - sx);
+        const h = Math.min(CHUNK, ch - sy);
+        const part = document.createElement('canvas');
+        part.width = w;
+        part.height = h;
+        const pctx = part.getContext('2d');
+        if (!pctx) continue;
+        pctx.drawImage(cv, sx, sy, w, h, 0, 0, w, h);
+        const spr = new Sprite(new Texture({ source: new CanvasSource({ resource: part }) }));
+        spr.position.set(OFF_X + sx, OFF_Y + sy);
+        this.terrain.addChildAt(spr, slot++);
+      }
+    }
     for (const g of this.flatTerrain) g.alpha = 0;
 
     let texs: Record<string, Texture>;
