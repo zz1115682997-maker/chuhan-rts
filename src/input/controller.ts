@@ -487,7 +487,7 @@ export class Controller {
     if (!b) return;
     this.world.enqueue({ c: 'sell', id: this.selectedBuilding });
     this.selectedBuilding = null;
-    this.hud.toast('已出售，返还一半粮草');
+    this.hud.toast(b.kind === 'daying' ? '大营已收起，军旗车回到营地。粮草不退' : '已出售，返还一半粮草');
     this.hud.refresh();
   }
 

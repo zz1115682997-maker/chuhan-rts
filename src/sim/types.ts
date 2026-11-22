@@ -16,7 +16,7 @@ export type UnitKind =
   | 'weixiuche'
   | 'grainCart';
 
-export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang' | 'juma' | 'nutai' | 'xiankeng';
+export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang' | 'juma' | 'nutai' | 'xiankeng' | 'fengjiantai';
 
 export type Armor = 'infantry' | 'light' | 'heavy' | 'building';
 export type Warhead = 'blade' | 'bolt' | 'charge' | 'siege';

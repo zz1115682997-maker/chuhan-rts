@@ -50,6 +50,7 @@ export class Renderer {
   private buildingSprites = new Map<number, Sprite>();
   private buildingLabels = new Map<number, Text>();
   private effects: Effect[] = [];
+  private wallTip: Text | null = null;
   private walkFrames = location.search.includes('walk=1');
   private sim: World;
 
@@ -124,7 +125,7 @@ export class Renderer {
           console.warn('[art] 部分立绘缺失，保留代码画法', err);
         }
         bArt = new Map<string, Texture>();
-        for (const k of ['nutai', 'canglin', 'daying', 'bingying', 'chemafang']) {
+        for (const k of ['nutai', 'canglin', 'daying', 'bingying', 'chemafang', 'fengjiantai']) {
           try {
             bArt.set(k, await Assets.load(`/assets/units/${k}_art.png`));
           } catch {
@@ -539,12 +540,43 @@ export class Renderer {
       }
     }
 
-    if (this.wallCells) {
+    if (this.wallCells && this.wallCells.length) {
       for (const cell of this.wallCells) {
         const color = cell.ok ? 0x7ef2a0 : 0xff6b5a;
-        g.poly(tileDiamond(cell.tx, cell.ty)).fill({ color, alpha: 0.28 });
+        g.poly(tileDiamond(cell.tx, cell.ty)).fill({ color, alpha: 0.2 });
         g.poly(tileDiamond(cell.tx, cell.ty)).stroke({ width: 1.5, color, alpha: 0.9 });
       }
+      // 连成一条线：一眼看出这一排会接成多长，而不是一堆散格子
+      const okCells = this.wallCells.filter((c) => c.ok);
+      const centers = okCells.map((c) => ({ x: isoX(c.tx + 0.5, c.ty + 0.5), y: isoY(c.tx + 0.5, c.ty + 0.5) }));
+      if (centers.length > 1) {
+        g.moveTo(centers[0].x, centers[0].y);
+        for (let i = 1; i < centers.length; i++) g.lineTo(centers[i].x, centers[i].y);
+        g.stroke({ width: 3, color: 0x9bffb0, alpha: 0.9 });
+      }
+      for (const p of centers) g.circle(p.x, p.y, 3).fill({ color: 0xdcffe4, alpha: 0.95 });
+
+      const last = this.wallCells[this.wallCells.length - 1];
+      const lp = { x: isoX(last.tx + 0.5, last.ty + 0.5), y: isoY(last.tx + 0.5, last.ty + 0.5) };
+      if (!this.wallTip) {
+        this.wallTip = new Text({
+          text: '',
+          style: {
+            fontFamily: 'Microsoft YaHei, PingFang SC, Noto Sans SC, sans-serif',
+            fontSize: 12,
+            fill: 0xe6ffe8,
+            stroke: { color: 0x0b0f0c, width: 3 },
+          },
+        });
+        this.wallTip.anchor.set(0.5, 1);
+        this.labels.addChild(this.wallTip);
+      }
+      const bad = this.wallCells.length - okCells.length;
+      this.wallTip.text = `${okCells.length} 格 · ${okCells.length * BUILDING_DEFS.juma.cost} 粮${bad ? `（${bad} 格放不下）` : ''}`;
+      this.wallTip.position.set(lp.x, lp.y - 14);
+      this.wallTip.visible = true;
+    } else if (this.wallTip) {
+      this.wallTip.visible = false;
     }
 
     // building placement preview

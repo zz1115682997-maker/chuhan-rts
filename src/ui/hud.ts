@@ -12,7 +12,7 @@ export interface HudPort {
 }
 
 const STRUCTURES: BuildingKind[] = ['bingying', 'canglin', 'chemafang'];
-const WORKS: BuildingKind[] = ['juma', 'nutai', 'xiankeng'];
+const WORKS: BuildingKind[] = ['juma', 'nutai', 'xiankeng', 'fengjiantai'];
 
 // 底栏按钮图标直接用仓库里的立绘，少画一套图
 const ICON_SRC: Record<string, string> = {
@@ -28,6 +28,7 @@ const ICON_SRC: Record<string, string> = {
   grainCart: '/assets/units/grainCart_v.png',
   mcv: '/assets/units/mcv_v.png',
   nutai: '/assets/units/nutai_art.png',
+  fengjiantai: '/assets/units/fengjiantai_art.png',
   canglin: '/assets/units/canglin_art.png',
   bingying: '/assets/units/bingying_art.png',
   chemafang: '/assets/units/chemafang_art.png',
@@ -294,6 +295,13 @@ export class Hud implements HudPort {
     }
     this.deployBtn.style.display = hasMcv ? '' : 'none';
     this.sellBtn.style.display = this.ctrl && this.ctrl.selectedBuilding !== null ? '' : 'none';
+    // 大营不是卖，是收起：选中大营时按钮换成"收起"
+    const selB = this.ctrl?.selectedBuilding != null ? this.world.buildingById.get(this.ctrl.selectedBuilding) : null;
+    const isYard = selB?.kind === 'daying';
+    this.sellBtn.innerHTML = isYard ? btnHtml('收起', '变军旗车') : btnHtml('出售', '退 50%');
+    this.sellBtn.title = isYard
+      ? '大营收起，变回一辆军旗车（基地车），可以拉着跑。粮草不退'
+      : '选中已建成的建筑后出售，返还一半粮草';
     this.opBtn.textContent = this.ctrl?.leftClickOrders ? '左键下令' : '右键下令';
     this.opBtn.title = '切换操作方式（红警式左键下令 / 传统右键下令）';
 

@@ -8,6 +8,8 @@ export interface WeaponDef {
   damage: number;
   cooldown: number;
   warhead: Warhead;
+  /** 溅射半径（格）。只有烽火台这类"范围打击"才填，命中点周围的单位吃 55% 伤害。 */
+  splash?: number;
 }
 
 export interface UnitDef {
@@ -171,6 +173,12 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     kind: 'xiankeng', name: '陷坑', cost: 120, buildTime: 3, hp: 50, w: 1, h: 1,
     requires: null, produces: null, blocks: false, targetable: true, trapDamage: 0, taken: 8, weapon: null, sight: 2,
     hotkey: '6', desc: '看得见。攻击可以打掉。侦察兵靠近拆掉，自己还活着',
+  },
+  fengjiantai: {
+    kind: 'fengjiantai', name: '烽火台', cost: 1200, buildTime: 12, hp: 520, w: 1, h: 1,
+    requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1,
+    weapon: { range: 9.5, damage: 100, cooldown: 3.2, warhead: 'charge', splash: 1.5 }, sight: 13,
+    hotkey: '7', desc: '远程蓄力一击，砸中还能波及一圈，一发打散步兵群。视野最远，但造价高、皮薄，怕撞城车',
   },
 };
 

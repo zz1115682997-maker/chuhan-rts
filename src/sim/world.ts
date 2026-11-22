@@ -84,6 +84,8 @@ export class World {
 
   buildingVisible(viewer: number, b: Building): boolean {
     if (b.owner === viewer) return true;
+    // 陷坑埋在地下：敌人踩上去之前看不见，只有侦察兵能摸出来拆掉
+    if (b.kind === 'xiankeng') return false;
     for (let y = b.ty; y < b.ty + b.h; y++) {
       for (let x = b.tx; x < b.tx + b.w; x++) {
         if (this.tileVisible(viewer, x, y)) return true;
@@ -131,6 +133,22 @@ export class World {
     this.unitById.delete(id);
     this.addBuildingAt('daying', u.owner, tx, ty);
     this.events.push({ t: 'built', x: u.x, y: u.y, owner: u.owner });
+    return true;
+  }
+
+  /** 大营收起：变回一辆军旗车，原地腾出 3×3。不退还粮草。
+   *  军旗车放在原大营的中心格，这样原地再立旗几乎必然成功（3×3 是刚腾出来的）。 */
+  packYard(id: number): boolean {
+    const b = this.buildingById.get(id);
+    if (!b || !b.alive || b.owner !== 0 || b.kind !== 'daying') return false;
+    const ctx = b.tx + Math.floor(b.w / 2);
+    const cty = b.ty + Math.floor(b.h / 2);
+    b.alive = false;
+    this.map.clearOccupied(b.tx, b.ty, b.w, b.h);
+    this.events.push({ t: 'die', x: b.x, y: b.y, owner: b.owner });
+    const u = this.spawnUnit('mcv', b.owner, ctx + 0.5, cty + 0.5);
+    if (!u) return false;
+    this.events.push({ t: 'built', x: u.x, y: u.y, owner: b.owner });
     return true;
   }
 
@@ -383,6 +401,8 @@ export class World {
   sellBuilding(id: number): boolean {
     const b = this.buildingById.get(id);
     if (!b || !b.alive || b.owner !== 0) return false;
+    // 大营不是"卖"，是"收起"：变回军旗车，粮草不退，否则等于白拿钱又拿车
+    if (b.kind === 'daying') return this.packYard(id);
     const def = BUILDING_DEFS[b.kind];
     this.players[b.owner].credits += Math.round(def.cost * SELL_RATIO);
     b.alive = false;
@@ -790,11 +810,20 @@ export class World {
     return true;
   }
 
+  /** 建筑矩形上离单位最近的点（纯几何，不判视线），用于"走过去"的逼近目标 */
+  private rectNear(u: { x: number; y: number }, b: Building): Vec {
+    return {
+      x: Math.min(Math.max(u.x, b.tx), b.tx + b.w),
+      y: Math.min(Math.max(u.y, b.ty), b.ty + b.h),
+    };
+  }
+
   private updateAttack(u: Unit, dt: number): void {
     const def = UNIT_DEFS[u.kind];
     const tp0 = this.targetPos(u);
     if (tp0) {
-      const tp = this.aimPoint(u, tp0);
+      const bb = u.targetBuilding !== 0 ? this.buildingById.get(u.targetBuilding) : null;
+      const tp = bb ? this.rectNear(u, bb) : tp0;
       const d = Math.hypot(tp.x - u.x, tp.y - u.y);
       const pit = u.targetBuilding !== 0 && this.buildingById.get(u.targetBuilding)?.kind === 'xiankeng';
       const range = def.scout && pit ? DISARM_RANGE : def.weapon ? def.weapon.range : 1;
@@ -903,18 +932,28 @@ export class World {
     if (bestB !== 0) u.targetBuilding = bestB;
   }
 
-  /** 打建筑时瞄准的是矩形最近边，不是被建筑自己占着的中心格 */
-  private aimPoint(u: Unit, tp: Vec): Vec {
-    if (u.targetBuilding !== 0) {
-      const b = this.buildingById.get(u.targetBuilding);
-      if (b) {
-        return {
-          x: Math.min(Math.max(u.x, b.tx), b.tx + b.w),
-          y: Math.min(Math.max(u.y, b.ty), b.ty + b.h),
-        };
+  /**
+   * 建筑自己占着格子，瞄准它的"矩形最近边"经常是内部不可走格，视线会误判成被墙挡住。
+   * 所以对外开火统一找它外围一圈可走格中最近、且看得见的那个点。
+   */
+  private visionEdge(t: Building, fromX: number, fromY: number): Vec | null {
+    let best: Vec | null = null;
+    let bestD = Infinity;
+    const fx = Math.floor(fromX);
+    const fy = Math.floor(fromY);
+    for (let y = t.ty - 1; y <= t.ty + t.h; y++) {
+      for (let x = t.tx - 1; x <= t.tx + t.w; x++) {
+        const inside = x >= t.tx && x < t.tx + t.w && y >= t.ty && y < t.ty + t.h;
+        if (inside || !this.map.passable(x, y)) continue;
+        if (!lineOfSight(this.map, fx, fy, x, y)) continue;
+        const d = (x + 0.5 - fromX) ** 2 + (y + 0.5 - fromY) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = { x: x + 0.5, y: y + 0.5 };
+        }
       }
     }
-    return tp;
+    return best;
   }
 
   private tryFire(u: Unit): void {
@@ -922,10 +961,19 @@ export class World {
     if (!def.weapon || u.cooldown > 0) return;
     const tp0 = this.targetPos(u);
     if (!tp0) return;
-    const tp = this.aimPoint(u, tp0);
+    let tp = tp0;
+    let losOk = false;
+    if (u.targetBuilding !== 0) {
+      const bb = this.buildingById.get(u.targetBuilding);
+      if (!bb) return;
+      const edge = this.visionEdge(bb, u.x, u.y);
+      if (!edge) return;
+      tp = edge;
+      losOk = true;
+    }
     const d = Math.hypot(tp.x - u.x, tp.y - u.y);
     if (d > def.weapon.range) return;
-    if (!lineOfSight(this.map, Math.floor(u.x), Math.floor(u.y), Math.floor(tp.x), Math.floor(tp.y))) return;
+    if (!losOk && !lineOfSight(this.map, Math.floor(u.x), Math.floor(u.y), Math.floor(tp.x), Math.floor(tp.y))) return;
     u.cooldown = def.weapon.cooldown;
     u.facing = Math.atan2(tp.y - u.y, tp.x - u.x);
     this.events.push({ t: 'shot', x: u.x, y: u.y, tx: tp.x, ty: tp.y, owner: u.owner, kind: def.weapon.warhead });
@@ -992,7 +1040,12 @@ export class World {
     return false;
   }
 
-  private fireTower(b: Building, weapon: { range: number; damage: number; cooldown: number; warhead: 'blade' | 'bolt' | 'charge' | 'siege' }): void {
+  /**
+   * 工事开火：先打视野里的敌方单位，没兵了才拆建筑。
+   * 口径是"凡是能开火的都能打一切能被打的目标"，撞城车不是唯一能拆家的。
+   * 判距离一律用矩形最近边，和单位 aimPoint 保持同一套算法。
+   */
+  private fireTower(b: Building, weapon: { range: number; damage: number; cooldown: number; warhead: 'blade' | 'bolt' | 'charge' | 'siege'; splash?: number }): void {
     if (b.cooldown > 0) {
       b.cooldown -= DT;
       return;
@@ -1007,13 +1060,58 @@ export class World {
         best = u.id;
       }
     }
-    if (best === 0) return;
-    const target = this.unitById.get(best);
-    if (!target) return;
-    if (!this.towerSees(b, target.x, target.y)) return;
+    if (best !== 0) {
+      const target = this.unitById.get(best);
+      if (!target) return;
+      if (!this.towerSees(b, target.x, target.y)) return;
+      b.cooldown = weapon.cooldown;
+      this.events.push({ t: 'shot', x: b.x, y: b.y, tx: target.x, ty: target.y, owner: b.owner, kind: weapon.warhead });
+      this.damageUnit(best, weapon.damage, weapon.warhead);
+      // 溅射：命中点周围一圈吃 55% 伤害，这是烽火台和弩台的根本区别（打散兵群 vs 逐个点杀）
+      if (weapon.splash) {
+        const r2 = weapon.splash * weapon.splash;
+        for (const o of this.units) {
+          if (!o.alive || o.owner === b.owner || o.id === best) continue;
+          const dd = (o.x - target.x) ** 2 + (o.y - target.y) ** 2;
+          if (dd <= r2) this.damageUnit(o.id, weapon.damage * 0.55, weapon.warhead);
+        }
+      }
+      return;
+    }
+
+    // 视野里没兵 —— 拆建筑
+    let bestB = 0;
+    let bestBD = weapon.range * weapon.range;
+    let bestEdge: Vec | null = null;
+    for (const t of this.buildings) {
+      if (!t.alive || t.owner === b.owner || !BUILDING_DEFS[t.kind].targetable) continue;
+      if (t.kind === 'xiankeng') continue;
+      if (!this.buildingVisible(b.owner, t)) continue;
+      // 目标建筑自己占着格子：找它外圈里"塔看得见、且够得着"的最近一格当炮口
+      let edge: Vec | null = null;
+      let edgeD = Infinity;
+      for (let y = t.ty - 1; y <= t.ty + t.h; y++) {
+        for (let x = t.tx - 1; x <= t.tx + t.w; x++) {
+          const inside = x >= t.tx && x < t.tx + t.w && y >= t.ty && y < t.ty + t.h;
+          if (inside || !this.map.passable(x, y)) continue;
+          const d = (x + 0.5 - b.x) ** 2 + (y + 0.5 - b.y) ** 2;
+          if (d >= edgeD || d > bestBD) continue;
+          if (!this.towerSees(b, x + 0.5, y + 0.5)) continue;
+          edgeD = d;
+          edge = { x: x + 0.5, y: y + 0.5 };
+        }
+      }
+      if (!edge) continue;
+      if (edgeD < bestBD) {
+        bestBD = edgeD;
+        bestB = t.id;
+        bestEdge = edge;
+      }
+    }
+    if (bestB === 0 || !bestEdge) return;
     b.cooldown = weapon.cooldown;
-    this.events.push({ t: 'shot', x: b.x, y: b.y, tx: target.x, ty: target.y, owner: b.owner, kind: weapon.warhead });
-    this.damageUnit(best, weapon.damage, weapon.warhead);
+    this.events.push({ t: 'shot', x: b.x, y: b.y, tx: bestEdge.x, ty: bestEdge.y, owner: b.owner, kind: weapon.warhead });
+    this.damageBuilding(bestB, weapon.damage, weapon.warhead);
   }
 
   // ---------------------------------------------------------------- harvesters
@@ -1200,23 +1298,20 @@ export class World {
     }
   }
 
-  private checkVictory(): void {
-    let p0 = false;
-    let p1 = false;
+  /** 判定口径：还有活着的单位，或还有能生产/补给的非工事建筑，才算"还活着"。
+   *  只挂着一堵拒马不算——既打不了也造不了，等同于输了。 */
+  private alivePlayer(owner: number): boolean {
+    for (const u of this.units) if (u.alive && u.owner === owner) return true;
     for (const b of this.buildings) {
-      if (!b.alive) continue;
-      if (b.owner === 0) p0 = true;
-      else p1 = true;
-      if (p0 && p1) return;
+      if (!b.alive || b.owner !== owner) continue;
+      if (b.kind !== 'juma' && b.kind !== 'nutai' && b.kind !== 'xiankeng' && b.kind !== 'fengjiantai') return true;
     }
-    // 还没展开的基地车也算"还活着"，否则开局瞬间就判负了
-    if (!p0 || !p1) {
-      for (const u of this.units) {
-        if (!u.alive || u.kind !== 'mcv') continue;
-        if (u.owner === 0) p0 = true;
-        else p1 = true;
-      }
-    }
+    return false;
+  }
+
+  private checkVictory(): void {
+    const p0 = this.alivePlayer(0);
+    const p1 = this.alivePlayer(1);
     if (p0 && p1) return;
     if (!p0 && !p1) this.state = 'won';
     else if (!p0) this.state = 'lost';

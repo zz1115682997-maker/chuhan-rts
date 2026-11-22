@@ -308,8 +308,16 @@ function drawWorks(kind: BuildingKind, owner: number): Container {
     g.moveTo(0, -8).lineTo(0, -22).stroke({ width: 2.4, color: WOOD });
     g.poly([-12, -18, 12, -18, 8, -24, -8, -24]).fill(WOOD).stroke({ width: 1.5, color: INK });
     g.moveTo(-10, -16).lineTo(14, -16).stroke({ width: 1.4, color: STEEL });
+  } else if (kind === 'fengjiantai') {
+    // 兜底画法：细高柱 + 顶部火盆（有立绘时会被覆盖）
+    g.ellipse(0, 16, 20, 7).fill({ color: 0x000000, alpha: 0.26 });
+    g.poly([-9, 12, 0, 16, 0, -34, -9, -38]).fill(dark).stroke({ width: 1.6, color: INK });
+    g.poly([0, 16, 9, 12, 9, -38, 0, -34]).fill(col).stroke({ width: 1.6, color: INK });
+    g.poly([0, -34, 9, -38, 0, -42, -9, -38]).fill(light).stroke({ width: 1.5, color: INK });
+    g.poly([-13, -42, 13, -42, 9, -34, -9, -34]).fill(0x5a3a1e).stroke({ width: 1.5, color: INK });
+    g.poly([-7, -42, 0, -56, 7, -42]).fill(0xff8a3a).stroke({ width: 1.2, color: 0x8a3a10 });
+    g.poly([-3, -42, 0, -50, 3, -42]).fill(0xffd27a);
   } else {
-    g.ellipse(0, 6, 18, 8).fill(0x1a120c).stroke({ width: 2, color: 0x4a3828 });
     g.ellipse(0, 5, 10, 4).fill(0x0c0908);
     g.moveTo(-12, 4).lineTo(-4, -8).stroke({ width: 2.2, color: WOOD });
     g.moveTo(12, 4).lineTo(4, -8).stroke({ width: 2.2, color: WOOD });
@@ -365,7 +373,7 @@ function drawJuma(mask: number): Container {
 
 function drawBuilding(kind: BuildingKind, owner: number): Container {
   if (kind === 'juma') return drawJuma(0);
-  if (kind === 'nutai' || kind === 'xiankeng') return drawWorks(kind, owner);
+  if (kind === 'nutai' || kind === 'xiankeng' || kind === 'fengjiantai') return drawWorks(kind, owner);
   const def = BUILDING_DEFS[kind];
   const c = new Container();
   const g = new Graphics();
