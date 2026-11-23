@@ -7,7 +7,7 @@
     <style>
       * { box-sizing: border-box; }
       html, body {
-        margin: 0; height: 100%; overflow: hidden; background: #000;
+        margin: 0; height: 100%; overflow: hidden; background: #222b1d;
         color: #ece2cd; font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
         user-select: none; -webkit-user-select: none;
       }
@@ -161,6 +161,9 @@
         font-size: 13px; color: #e6dcc4; line-height: 1.65; min-height: 58px;
         padding: 4px 4px 0; 
       }
+      /* 没选中任何东西时整块收起来，别让操作说明常年压在地图上 */
+      .info:empty { display: none; min-height: 0; }
+      .bottom:has(.info:empty) { display: none; }
       .dim { color: #a89880; }
 
       .toast {
@@ -185,6 +188,21 @@
       .overlay button {
         background: #2a3d2a; color: #ece2cd; border: 1px solid #7fa869; padding: 9px 28px;
         border-radius: 5px; cursor: pointer; font-size: 15px; font-family: inherit;
+      }
+      .overlay button:hover { filter: brightness(1.12); }
+      .overlay button.ghost { background: transparent; border-color: #5d6f50; color: #b9c7ad; }
+      .overlay .card.wide { min-width: 460px; padding: 28px 44px; text-align: left; }
+      .overlay .card.wide h2 { text-align: center; }
+      .overlay .sub { text-align: center; font-size: 13px; letter-spacing: 2px; color: #8fa08f; margin: 0 0 20px; }
+      .stats { display: grid; grid-template-columns: 1fr auto; gap: 7px 28px; font-size: 14px; color: #d8d2be; margin: 0 0 24px; }
+      .stats span { color: #9db193; }
+      .stats b { color: #e8c46a; font-weight: 600; text-align: right; }
+      .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+      .keys { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 30px; font-size: 13px; line-height: 1.95; color: #cfc9b4; }
+      .keys kbd {
+        display: inline-block; min-width: 26px; padding: 1px 6px; margin-right: 9px; text-align: center;
+        border: 1px solid #5d6f50; border-radius: 4px; background: #1d2a1e; color: #e8c46a; font-size: 12px;
+        font-family: inherit;
       }
 
       /* ---------- 开局界面 ---------- */

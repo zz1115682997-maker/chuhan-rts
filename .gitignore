@@ -6,3 +6,8 @@ dist/
 .npm-logs/
 # AI 原始大图（1536，仅作生成输入，成品在 assets/units 下）
 assets/**/*_raw.png
+# 素材原始下载与预览稿，不进仓库（成品已经处理到 assets 下的正式路径）
+assets/terrain/_raw*/
+assets/terrain/preview-*.png
+# 自测截图
+shots/

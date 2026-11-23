@@ -28,6 +28,7 @@ const ICON_SRC: Record<string, string> = {
   grainCart: '/assets/units/grainCart_v.png',
   mcv: '/assets/units/mcv_v.png',
   nutai: '/assets/units/nutai_art.png',
+  shuaita: '/assets/units/shuaita_art.png',
   fengjiantai: '/assets/units/fengjiantai_art.png',
   canglin: '/assets/units/canglin_art.png',
   bingying: '/assets/units/bingying_art.png',
@@ -68,6 +69,8 @@ export class Hud implements HudPort {
   private minimap: HTMLCanvasElement;
   private mmCtx: CanvasRenderingContext2D;
   private overlay: HTMLElement;
+  private pauseOverlay: HTMLElement;
+  private helpOverlay: HTMLElement;
   private placeBtn: HTMLButtonElement;
   private deployBtn: HTMLButtonElement;
   private sellBtn: HTMLButtonElement;
@@ -243,6 +246,55 @@ export class Hud implements HudPort {
     // --- toast + end overlay
     this.toastEl = el('div', 'toast', root);
     this.overlay = el('div', 'overlay hidden', root);
+
+    // --- pause / help overlays
+    this.pauseOverlay = el('div', 'overlay hidden', root);
+    this.pauseOverlay.innerHTML = `<div class="card wide">
+      <h2>暂停</h2>
+      <p class="sub">按 Esc 继续</p>
+      <div class="btn-row">
+        <button data-act="resume">继续</button>
+        <button data-act="help" class="ghost">操作说明</button>
+        <button data-act="restart" class="ghost">重新开局</button>
+        <button data-act="menu" class="ghost">回主菜单</button>
+      </div>
+    </div>`;
+    this.pauseOverlay.addEventListener('click', (ev) => {
+      const b = (ev.target as HTMLElement).closest('button');
+      if (!b) return;
+      const act = b.dataset.act;
+      if (act === 'resume') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      else if (act === 'help') this.openHelp();
+      else if (act === 'restart') location.reload();
+      else if (act === 'menu') location.href = location.pathname;
+    });
+
+    this.helpOverlay = el('div', 'overlay hidden', root);
+    this.helpOverlay.innerHTML = `<div class="card wide">
+      <h2>操作</h2>
+      <p class="sub">鼠标与键位</p>
+      <div class="keys">
+        <div><kbd>左键</kbd>框选 / 下令</div>
+        <div><kbd>右键</kbd>取消选中，按住拖动移视野</div>
+        <div><kbd>Shift</kbd>加选，或追加路径点</div>
+        <div><kbd>双击</kbd>全选同类</div>
+        <div><kbd>Ctrl+1~9</kbd>编队</div>
+        <div><kbd>F</kbd>军旗就地立营</div>
+        <div><kbd>Q</kbd>建筑</div>
+        <div><kbd>W</kbd>工事</div>
+        <div><kbd>E</kbd>士兵</div>
+        <div><kbd>R</kbd>车辆</div>
+        <div><kbd>H</kbd>镜头回到军旗</div>
+        <div><kbd>空格</kbd>按住左键拖视野</div>
+        <div><kbd>滚轮</kbd>缩放</div>
+        <div><kbd>Esc</kbd>暂停</div>
+      </div>
+      <div class="btn-row" style="margin-top:22px"><button data-act="close">知道了</button></div>
+    </div>`;
+    this.helpOverlay.addEventListener('click', (ev) => {
+      const b = (ev.target as HTMLElement).closest('button');
+      if (b?.dataset.act === 'close') this.helpOverlay.classList.add('hidden');
+    });
   }
 
   attach(ctrl: Controller, renderer: Renderer): void {
@@ -337,9 +389,7 @@ export class Hud implements HudPort {
             : BUILDING_DEFS[it.kind as BuildingKind].name;
         const row = el('div', 'qrow', this.queueEl);
         el('span', 'qname', row).textContent = name;
-        const bar = el('div', 'qbar', row);
-        const fill = el('i', undefined, bar);
-        fill.style.width = `${Math.min(100, (it.progress / it.buildTime) * 100)}%`;
+        // 进度只在建造按钮上画一圈（paintRing），队列里不再重复一条进度条
         const x = el('button', 'qx', row);
         x.textContent = '×';
         x.dataset.act = act;
@@ -383,10 +433,8 @@ export class Hud implements HudPort {
     }
     const sel = [...ctrl.selection];
     if (sel.length === 0) {
-      const order = ctrl.leftClickOrders
-        ? '左键框选或下令 · 右键取消选中，命令继续走'
-        : '左键框选 · 右键下令';
-      this.infoEl.innerHTML = `<span class="dim">${order} · 中键或空格+左键拖动地图 · 鼠标推到屏幕边滚屏 · Q建筑 W工事 E士兵 R车辆 · H回到军旗</span>`;
+      // 没有选中就不显示任何东西：操作说明在暂停/帮助面板里，别常驻压着地图
+      this.infoEl.innerHTML = '';
       return;
     }
     const counts = new Map<string, number>();
@@ -448,10 +496,46 @@ export class Hud implements HudPort {
     this.toastLife = 90;
   }
 
+  /** Esc 暂停：暂停界面里能继续、看操作说明、重开、回主菜单。 */
+  showPause(on: boolean): void {
+    this.pauseOverlay.classList.toggle('hidden', !on);
+    if (!on) this.helpOverlay.classList.add('hidden');
+  }
+
+  private openHelp(): void {
+    this.helpOverlay.classList.remove('hidden');
+  }
+
   gameOver(win: boolean): void {
+    const w = this.world;
+    const t = Math.floor(w.gameSeconds);
+    const mm = Math.floor(t / 60);
+    const ss = (t % 60).toString().padStart(2, '0');
+    const alive = w.units.filter((u) => u.alive && u.owner === 0).length;
+    const aliveEnemy = w.units.filter((u) => u.alive && u.owner === 1).length;
+    const myB = w.buildings.filter((b) => b.alive && b.owner === 0).length;
+    const fac = FACTION_NAMES[w.players[0].faction];
     this.overlay.classList.remove('hidden');
-    this.overlay.innerHTML = `<div class="card"><h2>${win ? '大破楚军' : '大营失守'}</h2>
-      <p>${win ? '汉军胜' : '楚军胜'}</p>
-      <button onclick="location.reload()">再来一局</button></div>`;
+    this.overlay.innerHTML = `<div class="card wide">
+      <h2>${win ? '大破楚军' : '大营失守'}</h2>
+      <p class="sub">${win ? '敌方已无还手之力' : '我方已无可战之兵'} · ${fac}</p>
+      <div class="stats">
+        <span>用时</span><b>${mm}:${ss}</b>
+        <span>剩余兵力</span><b>${alive} 人</b>
+        <span>剩余建筑</span><b>${myB} 座</b>
+        <span>敌军残兵</span><b>${aliveEnemy} 人</b>
+        <span>余粮</span><b>${Math.round(w.players[0].credits)}</b>
+      </div>
+      <div class="btn-row">
+        <button data-act="again">同图再来一局</button>
+        <button data-act="menu" class="ghost">换张地图</button>
+      </div>
+    </div>`;
+    this.overlay.onclick = (ev) => {
+      const t2 = (ev.target as HTMLElement).closest('button');
+      if (!t2) return;
+      if (t2.dataset.act === 'menu') location.href = location.pathname;
+      else location.reload();
+    };
   }
 }

@@ -55,6 +55,8 @@ export class Renderer {
   private terrain = new Container();
   /** 纯色兜底层：真实地表烘焙好后淡出。 */
   private flatTerrain: Graphics[] = [];
+  /** 地形装饰的 sprite。建筑盖上来时要藏掉，否则树冠会从建筑身上长出来。 */
+  private decoSprites: { tx: number; ty: number; spr: Sprite; gone?: boolean }[] = [];
   private fog = new Graphics();
   /** 外部立绘单位没有自带投影，影子单独画在这一层（在单位之下）。 */
   private unitShadows = new Graphics();
@@ -78,7 +80,9 @@ export class Renderer {
   static async create(canvasHost: HTMLElement, sim: World): Promise<Renderer> {
     const app = new Application();
     await app.init({
-      background: '#000000',
+      // 画布透明，底色交给页面 CSS：地图是菱形、视口是矩形，四角必然有没铺地表的地方。
+      // RA2 那里是纯黑 void，我们不要黑，让它看起来是"更远的、压暗的地面"。
+      backgroundAlpha: 0,
       resizeTo: window,
       antialias: true,
       autoDensity: true,
@@ -146,7 +150,7 @@ export class Renderer {
           console.warn('[art] 部分立绘缺失，保留代码画法', err);
         }
         bArt = new Map<string, Texture>();
-        for (const k of ['nutai', 'canglin', 'daying', 'bingying', 'chemafang', 'fengjiantai']) {
+        for (const k of ['nutai', 'canglin', 'daying', 'bingying', 'chemafang', 'fengjiantai', 'shuaita']) {
           try {
             bArt.set(k, await Assets.load(`/assets/units/${k}_art.png`));
           } catch {
@@ -187,6 +191,7 @@ export class Renderer {
     this.world = new Container();
     this.entities.sortableChildren = true;
     this.world.addChild(this.terrain, this.fog, this.unitShadows, this.entities, this.labels, this.overlay);
+    // 贴图还没加载出来时画布底色本身就是暗草色，屏幕不会露黑
     app.stage.addChild(this.world, this.screenOverlay);
 
     this.buildTerrainFlat();
@@ -285,7 +290,7 @@ export class Renderer {
     const size = map.size;
     const HW = TILE_W / 2;
     const HH = TILE_H / 2;
-    const PAD = 180;
+    const PAD = 320;
     const cw = size * 2 * HW + PAD * 2;
     const ch = size * 2 * HH + PAD * 2;
     const cv = document.createElement('canvas');
@@ -293,10 +298,10 @@ export class Renderer {
     cv.height = ch;
     const ctx = cv.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#101511';
+    ctx.fillStyle = '#232b1e';
     ctx.fillRect(0, 0, cw, ch);
 
-    const ver = '?v=t2';
+    const ver = '?v=t8';
     const names = ['grass', 'dirt', 'water', 'rock'] as const;
     let imgs: HTMLImageElement[];
     try {
@@ -307,6 +312,29 @@ export class Renderer {
     }
     const S = 56;
     const maxOff = Math.max(1, imgs[0].width - S);
+
+    // 地图外不再留纯黑的 void（RA2 是黑的，但它有悬崖封边 + 相机限制；我们没有，
+    // 玩家一退视角就是一片死黑）。这里把圈外铺成"压暗的远景草地"，
+    // 视觉上是地图继续往远处延伸，只是暗下去。
+    const padCells = Math.ceil(PAD / HW) + 2;
+    ctx.globalAlpha = 0.82;
+    for (let y = -padCells; y < size + padCells; y++) {
+      for (let x = -padCells; x < size + padCells; x++) {
+        if (x >= 0 && y >= 0 && x < size && y < size) continue;
+        // 圈外沿用最近的边缘地形，水边往外还是暗水、岩边往外还是暗岩，不会在边界处硬切成草
+        const nx = Math.min(size - 1, Math.max(0, x));
+        const ny = Math.min(size - 1, Math.max(0, y));
+        const t = map.terrain[map.idx(nx, ny)];
+        const img = imgs[t] ?? imgs[0];
+        const sx = Math.floor(tileHash(x, y, 11) * maxOff);
+        const sy = Math.floor(tileHash(x, y, 23) * maxOff);
+        const dx = PAD + size * HW + (x - y) * HW;
+        const dy = PAD + (x + y) * HH;
+        ctx.setTransform(HW / S, HH / S, -HW / S, HH / S, dx, dy);
+        ctx.drawImage(img, sx, sy, S, S, 0, 0, S, S);
+      }
+    }
+    ctx.globalAlpha = 1;
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -336,8 +364,9 @@ export class Renderer {
         if (map.ore[i] > 0 || map.occupied[i] !== 0) continue;
         const h = tileHash(x, y, 37);
         if (t === T_GRASS) {
-          if (h < 0.04) decos.push({ x, y, name: 'tree' });
-          else if (h < 0.052) decos.push({ x, y, name: 'stones' });
+          // 密度照红警：树是点缀不是森林，草地大约每 70 格一棵
+          if (h < 0.013) decos.push({ x, y, name: 'tree' });
+          else if (h < 0.021) decos.push({ x, y, name: 'stones' });
           else if (
             h > 0.95 &&
             (terrainAt(x + 1, y) === T_WATER ||
@@ -363,7 +392,7 @@ export class Renderer {
     for (const d of decos) {
       const cx = PAD + size * HW + (d.x - d.y) * HW;
       const cy = PAD + (d.x + d.y + 1) * HH + 4;
-      const rx = d.name === 'tree' ? 26 : d.name === 'hill' ? 36 : 15;
+      const rx = d.name === 'tree' ? 17 : d.name === 'hill' ? 24 : 10;
       const ry = rx * 0.34;
       ctx.beginPath();
       ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
@@ -393,6 +422,21 @@ export class Renderer {
     }
     for (const g of this.flatTerrain) g.alpha = 0;
 
+    // 地图外的大块远景。RA2 的地图外是纯黑 void（编辑器里边缘外永远 0 高度、不绘制），
+    // 靠悬崖封边 + 相机限制让玩家看不到；我们视口是矩形、地图是菱形，四角必然露出来，
+    // 所以在地形层最底铺一块压暗的草地，让"外面"看起来是更远的、暗下去的地面。
+    try {
+      const bgSpr = new Sprite(Texture.from(imgs[0]));
+      bgSpr.anchor.set(0.5);
+      bgSpr.width = 9000;
+      bgSpr.height = 9000;
+      bgSpr.position.set(0, size * HH);
+      bgSpr.tint = 0x4b5442;
+      this.terrain.addChildAt(bgSpr, 0);
+    } catch {
+      /* 拿不到纹理就跳过，画布底色兜底 */
+    }
+
     let texs: Record<string, Texture>;
     try {
       const [tree, stones, hill, reeds] = await Promise.all([
@@ -414,6 +458,7 @@ export class Renderer {
       spr.position.set(isoX(d.x + 0.5, d.y + 0.5), isoY(d.x + 0.5, d.y + 0.5) + 6);
       // 装饰属于地形层：放在 terrain 里才会被迷雾盖住，进 entities 会在未探明区露出来
       this.terrain.addChild(spr);
+      this.decoSprites.push({ tx: d.x, ty: d.y, spr });
     }
   }
 
@@ -445,8 +490,13 @@ export class Renderer {
 
   clampCam(): void {
     const S = this.sim.map.size;
-    this.cam.x = Math.min(S, Math.max(0, this.cam.x));
-    this.cam.y = Math.min(S, Math.max(0, this.cam.y));
+    // 视口不是点。把屏幕半宽/半高换算成格数，反推镜头能走到哪 ——
+    // 限制住镜头，屏幕就不会把地图和它的收边地表之外的空白拖进来（RA2 也是这么做的）。
+    const vx = this.screenW / 2 / this.zoom;
+    const vy = this.screenH / 2 / this.zoom;
+    const m = Math.min(S / 2 - 1, (vx / (TILE_W / 2) + vy / (TILE_H / 2)) / 4);
+    this.cam.x = Math.min(S - m, Math.max(m, this.cam.x));
+    this.cam.y = Math.min(S - m, Math.max(m, this.cam.y));
   }
 
   centerOn(x: number, y: number): void {
@@ -491,6 +541,7 @@ export class Renderer {
 
   draw(dt: number): void {
     this.applyCamera();
+    this.hideDecosUnderBuildings();
     this.drawFog();
     this.drawUnitShadows();
     this.syncUnits();
@@ -499,6 +550,28 @@ export class Renderer {
     this.drawMarquee();
     this.updateCorpses(dt);
     this.updateEffects(dt);
+  }
+
+  /**
+   * 建筑占住的格子不再显示树石。
+   * 装饰是烘焙/静态层，建筑是后贴的 sprite，不管的话树冠会"从建筑身上长出来"；
+   * 反过来建筑卖掉、被打掉后树会重新露出来。
+   */
+  private hideDecosUnderBuildings(): void {
+    if (this.decoSprites.length === 0) return;
+    const bs = this.sim.buildings;
+    for (const d of this.decoSprites) {
+      if (d.gone) continue;
+      for (const b of bs) {
+        if (!b.alive) continue;
+        if (d.tx >= b.tx && d.tx < b.tx + b.w && d.ty >= b.ty && d.ty < b.ty + b.h) {
+          // 被建筑压掉就永久消失：收营、卖房、房子被打掉之后都不再长回来
+          d.gone = true;
+          d.spr.visible = false;
+          break;
+        }
+      }
+    }
   }
 
   private drawMarquee(): void {
@@ -516,13 +589,23 @@ export class Renderer {
       .stroke({ width: 1.5, color: 0xa6ffc0, alpha: 0.95 });
   }
 
+  private fogTick = 0;
+
   private drawFog(): void {
+    // 迷雾每格一个多边形，全图 2304 格逐帧重建太浪费。只画镜头附近的一块，
+    // 并且每 6 帧才重建一次——迷雾变化本来就慢，玩家看不出来。
+    if (++this.fogTick % 6 !== 0 && this.fogTick > 1) return;
     const g = this.fog;
     g.clear();
     const map = this.sim.map;
     const S = map.size;
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
+    const R = 22;
+    const x0 = Math.max(0, Math.floor(this.cam.x) - R);
+    const x1 = Math.min(S - 1, Math.floor(this.cam.x) + R);
+    const y0 = Math.max(0, Math.floor(this.cam.y) - R);
+    const y1 = Math.min(S - 1, Math.floor(this.cam.y) + R);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         if (this.sim.tileVisible(0, x, y)) continue;
         const known = this.sim.tileExplored(0, x, y);
         g.poly(tileDiamond(x, y)).fill({ color: 0x000000, alpha: known ? 0.58 : 1 });

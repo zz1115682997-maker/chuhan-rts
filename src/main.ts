@@ -51,26 +51,36 @@ async function boot(): Promise<void> {
   let last = performance.now();
   let acc = 0;
   let over = false;
+  let paused = false;
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape' || world.state !== 'playing') return;
+    paused = !paused;
+    hud.showPause(paused);
+    ev.preventDefault();
+  });
 
   const frame = (now: number): void => {
     const dt = Math.min(0.2, (now - last) / 1000);
     last = now;
 
-    ctrl.update(dt);
-    if (world.state === 'playing') {
-      acc += dt;
-      let steps = 0;
-      while (acc >= DT && steps < 6) {
-        world.step();
-        acc -= DT;
-        steps++;
+    if (!paused) {
+      ctrl.update(dt);
+      if (world.state === 'playing') {
+        acc += dt;
+        let steps = 0;
+        while (acc >= DT && steps < 6) {
+          world.step();
+          acc -= DT;
+          steps++;
+        }
+        // 测试模式：钱管够，只看东西能不能造出来、长得对不对
+        if (sandbox) world.players[0].credits = 50000;
+      } else if (!over) {
+        over = true;
+        ctrl.setGameOver(world.state === 'won');
+        hud.gameOver(world.state === 'won');
       }
-      // 测试模式：钱管够，只看东西能不能造出来、长得对不对
-      if (sandbox) world.players[0].credits = 50000;
-    } else if (!over) {
-      over = true;
-      ctrl.setGameOver(world.state === 'won');
-      hud.gameOver(world.state === 'won');
     }
 
     renderer.pushEvents();
