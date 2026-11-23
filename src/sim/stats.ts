@@ -56,9 +56,20 @@ export interface BuildingDef {
   weapon: WeaponDef | null;
   /** 以建筑中心为圆心的开图半径，单位是格。 */
   sight: number;
+  /** 提供的水量。水塔才有，相当于红警电厂的发电。 */
+  waterOut: number;
+  /** 正常工作要消耗的水量。拒马、陷坑、烽火台是 0。 */
+  waterUse: number;
+  /** 水不够就停火。弩台像光棱塔；烽火台像机枪碉堡，不停。 */
+  stopsWithoutWater: boolean;
   hotkey: string;
   desc: string;
 }
+
+/** 士兵栏、车辆栏各自同时能排多少个。造完离队，不是整局只能有这么多兵。 */
+export const QUEUE_CAP = 99;
+/** 水不够时，造兵、造建筑的速度变成原来的这么多。 */
+export const WATER_LOW_RATE = 0.4;
 
 // ---- 汉军 (刘邦): 廉价量大、弩阵破甲、后劲足 ---------------------------------
 // ---- 楚军 (项羽): 精锐、冲锋、机动，前期猛后期乏力 ---------------------------
@@ -143,44 +154,57 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   daying: {
     kind: 'daying', name: '大营', cost: 0, buildTime: 0, hp: 1500, w: 3, h: 3,
     requires: null, produces: 'building', blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 9,
+    waterOut: 0, waterUse: 0, stopsWithoutWater: false,
     hotkey: '', desc: '建造与指挥中心',
   },
   canglin: {
     kind: 'canglin', name: '仓廪', cost: 1500, buildTime: 10, hp: 900, w: 3, h: 2,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 6,
+    waterOut: 0, waterUse: 10, stopsWithoutWater: false,
     hotkey: '1', desc: '收粮，粮车卸货点',
   },
   bingying: {
     kind: 'bingying', name: '兵营', cost: 500, buildTime: 6, hp: 800, w: 2, h: 2,
     requires: null, produces: 'infantry', blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 6,
+    waterOut: 0, waterUse: 15, stopsWithoutWater: false,
     hotkey: '2', desc: '训练步兵',
   },
   chemafang: {
     kind: 'chemafang', name: '车马坊', cost: 1800, buildTime: 12, hp: 1000, w: 3, h: 2,
     requires: 'bingying', produces: 'vehicle', blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 6,
+    waterOut: 0, waterUse: 20, stopsWithoutWater: false,
     hotkey: '3', desc: '造战车、骑兵、粮车',
+  },
+  shuaita: {
+    kind: 'shuaita', name: '水塔', cost: 800, buildTime: 10, hp: 600, w: 2, h: 2,
+    requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 6,
+    waterOut: 100, waterUse: 0, stopsWithoutWater: false,
+    hotkey: '8', desc: '木质水塔。水相当于电，不够时造得慢，弩台停火',
   },
   juma: {
     kind: 'juma', name: '拒马', cost: 200, buildTime: 5, hp: 380, w: 1, h: 1,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1, weapon: null, sight: 3,
+    waterOut: 0, waterUse: 0, stopsWithoutWater: false,
     hotkey: '4', desc: '可连成围墙。放下来之后按住拖动，一排一起放下',
   },
   nutai: {
     kind: 'nutai', name: '弩台', cost: 1200, buildTime: 12, hp: 560, w: 2, h: 2,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0,
     weapon: { range: 9.5, damage: 70, cooldown: 2.0, warhead: 'bolt' }, sight: 12, taken: 1,
+    waterOut: 0, waterUse: 40, stopsWithoutWater: true,
     hotkey: '5', desc: '远程强弩，射程最远、单发最重，隔着老远一支一支扎穿重甲；射速慢，怕被贴脸',
   },
   xiankeng: {
     kind: 'xiankeng', name: '陷坑', cost: 120, buildTime: 3, hp: 50, w: 1, h: 1,
     requires: null, produces: null, blocks: false, targetable: true, trapDamage: 0, taken: 8, weapon: null, sight: 2,
+    waterOut: 0, waterUse: 0, stopsWithoutWater: false,
     hotkey: '6', desc: '看得见。攻击可以打掉。侦察兵靠近拆掉，自己还活着',
   },
   fengjiantai: {
     kind: 'fengjiantai', name: '烽火台', cost: 700, buildTime: 9, hp: 620, w: 1, h: 1,
     requires: null, produces: null, blocks: true, targetable: true, trapDamage: 0, taken: 1,
     weapon: { range: 5.0, damage: 20, cooldown: 0.6, warhead: 'charge', splash: 0.9, burn: { seconds: 3, dps: 7 } },
-    sight: 7,
+    sight: 7, waterOut: 0, waterUse: 0, stopsWithoutWater: false,
     hotkey: '7', desc: '近身喷火的小碉堡，射速快、扇面扫一圈，被烧到的兵会自己继续着火；射程短，够不着远处',
   },
 };

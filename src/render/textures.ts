@@ -317,6 +317,14 @@ function drawWorks(kind: BuildingKind, owner: number): Container {
     g.poly([-13, -42, 13, -42, 9, -34, -9, -34]).fill(0x5a3a1e).stroke({ width: 1.5, color: INK });
     g.poly([-7, -42, 0, -56, 7, -42]).fill(0xff8a3a).stroke({ width: 1.2, color: 0x8a3a10 });
     g.poly([-3, -42, 0, -50, 3, -42]).fill(0xffd27a);
+  } else if (kind === 'shuaita') {
+    g.ellipse(0, 18, 22, 8).fill({ color: 0x000000, alpha: 0.28 });
+    g.poly([-16, 8, 0, 18, 0, -6, -16, -16]).fill(0x6b4a2a).stroke({ width: 1.6, color: INK });
+    g.poly([0, 18, 16, 8, 16, -16, 0, -6]).fill(0x8a6238).stroke({ width: 1.6, color: INK });
+    g.poly([0, -6, 16, -16, 0, -26, -16, -16]).fill(0xc4a574).stroke({ width: 1.6, color: INK });
+    g.ellipse(0, -20, 10, 4).fill(0x9fd0e8).stroke({ width: 1.2, color: INK });
+    g.moveTo(-6, 10).lineTo(-6, -8).stroke({ width: 2, color: WOOD });
+    g.moveTo(6, 6).lineTo(6, -12).stroke({ width: 2, color: WOOD });
   } else {
     g.ellipse(0, 5, 10, 4).fill(0x0c0908);
     g.moveTo(-12, 4).lineTo(-4, -8).stroke({ width: 2.2, color: WOOD });
@@ -373,7 +381,7 @@ function drawJuma(mask: number): Container {
 
 function drawBuilding(kind: BuildingKind, owner: number): Container {
   if (kind === 'juma') return drawJuma(0);
-  if (kind === 'nutai' || kind === 'xiankeng' || kind === 'fengjiantai') return drawWorks(kind, owner);
+  if (kind === 'nutai' || kind === 'xiankeng' || kind === 'fengjiantai' || kind === 'shuaita') return drawWorks(kind, owner);
   const def = BUILDING_DEFS[kind];
   const c = new Container();
   const g = new Graphics();

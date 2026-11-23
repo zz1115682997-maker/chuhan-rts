@@ -8,7 +8,7 @@ import type { World } from './world.js';
 
 export class AIController {
   owner: number;
-  private plan: BuildingKind[] = ['bingying', 'chemafang', 'canglin', 'bingying', 'chemafang'];
+  private plan: BuildingKind[] = ['shuaita', 'bingying', 'chemafang', 'canglin', 'bingying', 'chemafang'];
   private planI = 0;
   private waveSeconds = 80;
   // 开场留出建设期：这段时间只造不动手，让玩家先把建筑和兵排出来
@@ -67,7 +67,11 @@ export class AIController {
     }
 
     // 3) production（休战期内只造建筑，不攒兵，免得解禁那一刻直接一波压死）
-    if (world.gameSeconds >= this.graceSeconds && p.unitQueue.length === 0) this.pickUnit(world);
+    if (
+      world.gameSeconds >= this.graceSeconds &&
+      p.infantryQueue.length === 0 &&
+      p.vehicleQueue.length === 0
+    ) this.pickUnit(world);
 
     // 4) defend the base when something is close
     const threat = this.nearestThreat(world, AI_BASE.x, AI_BASE.y, 13);

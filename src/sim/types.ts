@@ -16,7 +16,7 @@ export type UnitKind =
   | 'weixiuche'
   | 'grainCart';
 
-export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang' | 'juma' | 'nutai' | 'xiankeng' | 'fengjiantai';
+export type BuildingKind = 'daying' | 'canglin' | 'bingying' | 'chemafang' | 'shuaita' | 'juma' | 'nutai' | 'xiankeng' | 'fengjiantai';
 
 export type Armor = 'infantry' | 'light' | 'heavy' | 'building';
 export type Warhead = 'blade' | 'bolt' | 'charge' | 'siege';
@@ -93,7 +93,10 @@ export interface PlayerState {
   id: number;
   faction: Faction;
   credits: number;
-  unitQueue: BuildItem[];
+  /** 士兵栏正在排的，同时最多 99，造完就能再排。 */
+  infantryQueue: BuildItem[];
+  /** 车辆栏正在排的，同时最多 99。 */
+  vehicleQueue: BuildItem[];
   buildingQueue: BuildItem[];
   readyBuilding: BuildingKind | null;
 }
@@ -108,7 +111,7 @@ export type Command =
   | { c: 'sell'; id: number }
   | { c: 'queueUnit'; kind: UnitKind }
   | { c: 'queueBuilding'; kind: BuildingKind }
-  | { c: 'cancelUnit' }
+  | { c: 'cancelUnit'; lane: 'infantry' | 'vehicle' }
   | { c: 'cancelBuilding' }
   | { c: 'placeBuilding'; kind: BuildingKind; tx: number; ty: number }
   | { c: 'placeWall'; kind: BuildingKind; tiles: { x: number; y: number }[] }

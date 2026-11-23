@@ -8,7 +8,7 @@ import { Rng } from './rng.js';
 import {
   BUILDING_DEFS, UNIT_DEFS, DAMAGE_TABLE,
   HARVEST_RATE, HARVEST_PER_TICK, GRAIN_VALUE, START_CREDITS, SELL_RATIO, DISARM_TIME, DISARM_RANGE,
-  REPAIR_PER_SECOND, REPAIR_VEHICLE_PER_SECOND,
+  REPAIR_PER_SECOND, REPAIR_VEHICLE_PER_SECOND, QUEUE_CAP, WATER_LOW_RATE,
 } from './stats.js';
 import type {
   Building, BuildingKind, BuildItem, Command, Faction, PlayerState, SimEvent, Unit, UnitKind, Vec,
@@ -111,7 +111,7 @@ export class World {
   private makePlayer(id: number, faction: Faction): PlayerState {
     return {
       id, faction, credits: START_CREDITS,
-      unitQueue: [], buildingQueue: [], readyBuilding: null,
+      infantryQueue: [], vehicleQueue: [], buildingQueue: [], readyBuilding: null,
     };
   }
 
@@ -292,7 +292,8 @@ export class World {
         break;
       case 'cancelUnit': {
         const p = this.players[0];
-        const it = p.unitQueue.pop();
+        const q = c.lane === 'vehicle' ? p.vehicleQueue : p.infantryQueue;
+        const it = q.pop();
         if (it) p.credits += it.cost;
         break;
       }
@@ -418,8 +419,10 @@ export class World {
     const def = UNIT_DEFS[kind];
     if (p.credits < def.cost) return false;
     if (!this.findProducer(owner, kind)) return false;
+    const lane = def.from === 'chemafang' ? p.vehicleQueue : p.infantryQueue;
+    if (lane.length >= QUEUE_CAP) return false;
     p.credits -= def.cost;
-    p.unitQueue.push({ kind, progress: 0, cost: def.cost, buildTime: def.buildTime });
+    lane.push({ kind, progress: 0, cost: def.cost, buildTime: def.buildTime });
     return true;
   }
 
@@ -427,7 +430,7 @@ export class World {
     const p = this.players[owner];
     const def = BUILDING_DEFS[kind];
     if (p.credits < def.cost) return false;
-    if (p.readyBuilding) return false;
+    if (p.readyBuilding || p.buildingQueue.length > 0) return false;
     if (!this.hasBuilding(owner, 'daying')) return false;
     if (def.requires && !this.hasBuilding(owner, def.requires)) return false;
     p.credits -= def.cost;
@@ -442,35 +445,51 @@ export class World {
   }
 
   private tickPlayerProduction(p: PlayerState): void {
+    const rate = this.waterBalance(p.id).low ? WATER_LOW_RATE : 1;
     if (p.buildingQueue.length > 0 && !p.readyBuilding && this.hasBuilding(p.id, 'daying')) {
       const item = p.buildingQueue[0];
-      item.progress += DT;
+      item.progress += DT * rate;
       if (item.progress >= item.buildTime) {
         p.readyBuilding = item.kind as BuildingKind;
         p.buildingQueue.shift();
       }
     }
+    this.tickUnitQueue(p, p.infantryQueue, rate);
+    this.tickUnitQueue(p, p.vehicleQueue, rate);
+  }
 
-    if (p.unitQueue.length > 0) {
-      const item = p.unitQueue[0];
-      const kind = item.kind as UnitKind;
-      const producer = this.findProducer(p.id, kind);
-      if (producer) {
-        item.progress += DT;
-        if (item.progress >= item.buildTime) {
-          const spot = this.findSpawnSpot(producer.x, producer.y, 4);
-          if (spot) {
-            p.unitQueue.shift();
-            const u = this.spawnUnit(kind, p.id, spot.x, spot.y);
-            if (u && producer.hasRally) {
-              this.enqueue({
-                c: 'move', ids: [u.id], x: producer.rallyX, y: producer.rallyY,
-              });
-            }
-          }
+  private tickUnitQueue(p: PlayerState, queue: BuildItem[], rate: number): void {
+    if (queue.length === 0) return;
+    const item = queue[0];
+    const kind = item.kind as UnitKind;
+    const producer = this.findProducer(p.id, kind);
+    if (!producer) return;
+    item.progress += DT * rate;
+    if (item.progress >= item.buildTime) {
+      const spot = this.findSpawnSpot(producer.x, producer.y, 4);
+      if (spot) {
+        queue.shift();
+        const u = this.spawnUnit(kind, p.id, spot.x, spot.y);
+        if (u && producer.hasRally) {
+          this.enqueue({
+            c: 'move', ids: [u.id], x: producer.rallyX, y: producer.rallyY,
+          });
         }
       }
     }
+  }
+
+  /** 水塔出水，耗水建筑喝水。supply 小于 demand 就是缺水。 */
+  waterBalance(owner: number): { supply: number; demand: number; low: boolean } {
+    let supply = 0;
+    let demand = 0;
+    for (const b of this.buildings) {
+      if (!b.alive || b.owner !== owner) continue;
+      const def = BUILDING_DEFS[b.kind];
+      supply += def.waterOut;
+      demand += def.waterUse;
+    }
+    return { supply, demand, low: demand > supply };
   }
 
   findProducer(owner: number, kind: UnitKind): Building | null {
@@ -1029,10 +1048,13 @@ export class World {
   }
 
   private updateDefenses(): void {
+    const low = [this.waterBalance(0).low, this.waterBalance(1).low];
     for (const b of this.buildings) {
       if (!b.alive) continue;
       const def = BUILDING_DEFS[b.kind];
-      if (def.weapon && b.alive) this.fireTower(b, def.weapon);
+      if (!def.weapon) continue;
+      if (def.stopsWithoutWater && low[b.owner]) continue;
+      this.fireTower(b, def.weapon);
     }
   }
 
@@ -1324,7 +1346,7 @@ export class World {
     for (const u of this.units) if (u.alive && u.owner === owner) return true;
     for (const b of this.buildings) {
       if (!b.alive || b.owner !== owner) continue;
-      if (b.kind !== 'juma' && b.kind !== 'nutai' && b.kind !== 'xiankeng' && b.kind !== 'fengjiantai') return true;
+      if (b.kind !== 'juma' && b.kind !== 'nutai' && b.kind !== 'xiankeng' && b.kind !== 'fengjiantai' && b.kind !== 'shuaita') return true;
     }
     return false;
   }

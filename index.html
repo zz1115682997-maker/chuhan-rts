@@ -117,6 +117,7 @@
       }
       .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; }
       .btn {
+        position: relative;
         display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 7px;
         min-width: 96px; min-height: 58px;
         background: linear-gradient(180deg, #34382c 0%, #1a201c 100%);
@@ -132,6 +133,15 @@
       .btn .txt { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
       .btn .nm { font-weight: 700; letter-spacing: 1px; line-height: 1.15; }
       .btn .cost { font-size: 11px; color: #e8c46a; letter-spacing: .5px; }
+      .btn .ring {
+        position: absolute; inset: 0; border-radius: 2px; pointer-events: none; opacity: 0; padding: 2px;
+        background: conic-gradient(#e8c46a calc(var(--pct) * 1%), transparent 0);
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        mask-composite: exclude;
+      }
+      .btn.producing .ring { opacity: 1; }
       .btn:hover:not(:disabled) {
         border-color: #e8c46a;
         background: linear-gradient(180deg, #4a4634 0%, #24281e 100%);

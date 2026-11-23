@@ -154,6 +154,18 @@ function blob(m: GameMap, cx: number, cy: number, r: number, type: number, rng: 
   }
 }
 
+function clearOre(m: GameMap, cx: number, cy: number, r: number): void {
+  const rr = r * r;
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (!m.inBounds(x, y)) continue;
+      const dx = x - cx;
+      const dy = y - cy;
+      if (dx * dx + dy * dy <= rr) m.ore[m.idx(x, y)] = 0;
+    }
+  }
+}
+
 function clearArea(m: GameMap, cx: number, cy: number, r: number): void {
   for (let y = cy - r; y <= cy + r; y++) {
     for (let x = cx - r; x <= cx + r; x++) {
@@ -372,13 +384,14 @@ export function generateMap(kind: MapKind, seed: number): GameMap {
   clearArea(m, 7, 7, 9);
   clearArea(m, S - 8, S - 8, 9);
 
-  const oreCount = kind === 'plains' ? 7 : kind === 'islands' ? 5 : 6;
+  const oreCount = kind === 'plains' ? 4 : kind === 'islands' ? 3 : 4;
   const oreSpots: Array<[number, number, number]> = [];
   for (let i = 0; i < oreCount; i++) {
-    oreSpots.push([4 + rng.int(S - 8), 4 + rng.int(S - 8), 2.2 + rng.next() * 2.2]);
+    oreSpots.push([8 + rng.int(S - 16), 8 + rng.int(S - 16), 1.2 + rng.next() * 1.1]);
   }
-  oreSpots.push([13, 13, 3.2]);
-  oreSpots.push([S - 13, S - 13, 3.2]);
+  // 出生点旁边留一块小田，不铺到军旗脚下
+  oreSpots.push([20, 14, 1.5]);
+  oreSpots.push([S - 20, S - 14, 1.5]);
 
   for (const [ox, oy, orad] of oreSpots) {
     for (let y = Math.floor(oy - orad); y <= oy + orad; y++) {
@@ -404,6 +417,8 @@ export function generateMap(kind: MapKind, seed: number): GameMap {
   // keep the two base pads clean after carving
   clearArea(m, 7, 7, 6);
   clearArea(m, S - 8, S - 8, 6);
+  clearOre(m, 7, 7, 8);
+  clearOre(m, S - 8, S - 8, 8);
 
   return m;
 }

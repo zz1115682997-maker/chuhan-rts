@@ -1,6 +1,6 @@
 // DOM HUD: resources, build panel, production queues, minimap, toasts, end screen.
 
-import { BUILDING_DEFS, FACTION_NAMES, UNIT_DEFS } from '../sim/stats.js';
+import { BUILDING_DEFS, FACTION_NAMES, QUEUE_CAP, UNIT_DEFS } from '../sim/stats.js';
 import type { BuildingKind, UnitKind } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Controller } from '../input/controller.js';
@@ -11,7 +11,7 @@ export interface HudPort {
   refresh(): void;
 }
 
-const STRUCTURES: BuildingKind[] = ['bingying', 'canglin', 'chemafang'];
+const STRUCTURES: BuildingKind[] = ['shuaita', 'bingying', 'canglin', 'chemafang'];
 const WORKS: BuildingKind[] = ['juma', 'nutai', 'xiankeng', 'fengjiantai'];
 
 // 底栏按钮图标直接用仓库里的立绘，少画一套图
@@ -38,7 +38,7 @@ const ICON_SRC: Record<string, string> = {
 function btnHtml(name: string, cost: string | number, icon?: string): string {
   const ico = icon ? `<img class="ico" src="${icon}" alt="">` : '';
   const extra = cost === '' ? '' : `<span class="cost">${cost}</span>`;
-  return `${ico}<span class="txt"><span class="nm">${name}</span>${extra}</span>`;
+  return `${ico}<span class="ring"></span><span class="txt"><span class="nm">${name}</span>${extra}</span>`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -58,6 +58,7 @@ export class Hud implements HudPort {
   private renderer: Renderer | null = null;
 
   private creditsEl: HTMLElement;
+  private waterEl: HTMLElement;
   private timerEl: HTMLElement;
   private toastEl: HTMLElement;
   private infoEl: HTMLElement;
@@ -91,6 +92,7 @@ export class Hud implements HudPort {
     const fac = world.players[0].faction;
     el('span', 'faction', top).textContent = FACTION_NAMES[fac];
     this.creditsEl = el('span', 'credits', top);
+    this.waterEl = el('span', 'credits', top);
     this.timerEl = el('span', 'timer', top);
     this.opBtn = el('button', 'opbtn', top);
     this.opBtn.addEventListener('click', () => this.ctrl?.toggleOpMode());
@@ -136,7 +138,7 @@ export class Hud implements HudPort {
       const act = t?.dataset?.act;
       if (!act) return;
       ev.stopPropagation();
-      if (act === 'unit') this.ctrl?.cancelUnit();
+      if (act === 'infantry' || act === 'vehicle') this.ctrl?.cancelUnit(act);
       else if (act === 'build') this.ctrl?.cancelBuilding();
     });
 
@@ -226,7 +228,8 @@ export class Hud implements HudPort {
       b.addEventListener('click', () => this.ctrl?.queueUnit(kind));
       b.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
-        this.ctrl?.cancelUnit();
+        const lane = UNIT_DEFS[kind].from === 'chemafang' ? 'vehicle' : 'infantry';
+        this.ctrl?.cancelUnit(lane);
       });
       this.unitBtns.set(kind, b);
     };
@@ -253,6 +256,9 @@ export class Hud implements HudPort {
     // 测试模式里粮草是硬补的，显示成 ∞ 免得看成"不增长"
     if (location.search.includes('sandbox')) this.creditsEl.textContent = '粮草 ∞';
     else this.creditsEl.textContent = `粮草 ${Math.round(this.world.players[0].credits)}`;
+    const water = this.world.waterBalance(0);
+    this.waterEl.textContent = water.demand === 0 ? `水 ${water.supply}` : `水 ${water.supply}/${water.demand}`;
+    this.waterEl.style.color = water.low ? '#e07a66' : '#9fd0e8';
     const t = Math.floor(this.world.gameSeconds);
     const m = Math.floor(t / 60);
     const s = t % 60;
@@ -280,13 +286,19 @@ export class Hud implements HudPort {
       const def = BUILDING_DEFS[kind as BuildingKind];
       const locked = !!def.requires && !this.world.hasBuilding(0, def.requires);
       const isReady = p.readyBuilding === kind;
-      btn.disabled = !hasYard || (isReady ? false : locked || !!p.readyBuilding || p.credits < def.cost);
+      const busy = p.buildingQueue.length > 0 || !!p.readyBuilding;
+      btn.disabled = !hasYard || (isReady ? false : locked || busy || p.credits < def.cost);
       btn.classList.toggle('ready', isReady);
+      const head = p.buildingQueue[0];
+      this.paintRing(btn, head && head.kind === kind ? head.progress / head.buildTime : 0);
     }
     for (const [kind, btn] of this.unitBtns) {
       const def = UNIT_DEFS[kind as UnitKind];
       const hasProducer = !!this.world.findProducer(0, kind as UnitKind);
-      btn.disabled = p.credits < def.cost || !hasProducer;
+      const lane = def.from === 'chemafang' ? p.vehicleQueue : p.infantryQueue;
+      btn.disabled = p.credits < def.cost || !hasProducer || lane.length >= QUEUE_CAP;
+      const head = lane[0];
+      this.paintRing(btn, head && head.kind === kind ? head.progress / head.buildTime : 0);
     }
     this.placeBtn.style.display = p.readyBuilding ? '' : 'none';
 
@@ -314,7 +326,10 @@ export class Hud implements HudPort {
 
     // queues
     this.queueEl.innerHTML = '';
-    const addQueue = (label: string, items: { kind: string; progress: number; buildTime: number }[], onCancel: () => void) => {
+    const addQueue = (
+      items: { kind: string; progress: number; buildTime: number }[],
+      act: 'infantry' | 'vehicle' | 'build',
+    ) => {
       for (const it of items) {
         const name =
           it.kind in UNIT_DEFS
@@ -327,12 +342,12 @@ export class Hud implements HudPort {
         fill.style.width = `${Math.min(100, (it.progress / it.buildTime) * 100)}%`;
         const x = el('button', 'qx', row);
         x.textContent = '×';
-        x.dataset.act = label === '单位' ? 'unit' : 'build';
-        void onCancel;
+        x.dataset.act = act;
       }
     };
-    addQueue('单位', this.world.players[0].unitQueue as never, () => this.ctrl?.cancelUnit());
-    addQueue('建筑', this.world.players[0].buildingQueue as never, () => this.ctrl?.cancelBuilding());
+    addQueue(p.infantryQueue, 'infantry');
+    addQueue(p.vehicleQueue, 'vehicle');
+    addQueue(p.buildingQueue, 'build');
     if (p.readyBuilding) {
       const row = el('div', 'qready', this.queueEl);
       const txt = el('span', undefined, row);
@@ -348,6 +363,12 @@ export class Hud implements HudPort {
       cancel.title = '取消并全额退款';
       cancel.dataset.act = 'build';
     }
+  }
+
+  private paintRing(btn: HTMLButtonElement, ratio: number): void {
+    const on = ratio > 0 && ratio < 1;
+    btn.classList.toggle('producing', on);
+    btn.style.setProperty('--pct', String(Math.max(0, Math.min(100, ratio * 100))));
   }
 
   private updateInfo(): void {

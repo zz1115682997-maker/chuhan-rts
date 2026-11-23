@@ -1,6 +1,6 @@
 // Mouse / keyboard input: selection, orders, camera panning, building placement.
 
-import { BUILDING_DEFS, UNIT_DEFS } from '../sim/stats.js';
+import { BUILDING_DEFS, QUEUE_CAP, UNIT_DEFS } from '../sim/stats.js';
 import type { BuildingKind, UnitKind } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Renderer } from '../render/renderer.js';
@@ -542,6 +542,10 @@ export class Controller {
       this.hud.toast('有建筑已造好：左键放置，右键取消并全额退粮');
       return;
     }
+    if (p.buildingQueue.length > 0) {
+      this.hud.toast('建筑一次只能造一座');
+      return;
+    }
     this.world.enqueue({ c: 'queueBuilding', kind });
     this.hud.refresh();
   }
@@ -557,12 +561,17 @@ export class Controller {
       this.hud.toast(`需要先造${BUILDING_DEFS[def.from].name}`);
       return;
     }
+    const lane = def.from === 'chemafang' ? p.vehicleQueue : p.infantryQueue;
+    if (lane.length >= QUEUE_CAP) {
+      this.hud.toast('这一栏同时最多排 99 个');
+      return;
+    }
     this.world.enqueue({ c: 'queueUnit', kind });
     this.hud.refresh();
   }
 
-  cancelUnit(): void {
-    this.world.enqueue({ c: 'cancelUnit' });
+  cancelUnit(lane: 'infantry' | 'vehicle'): void {
+    this.world.enqueue({ c: 'cancelUnit', lane });
     this.hud.refresh();
   }
 
