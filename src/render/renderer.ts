@@ -42,7 +42,7 @@ export class Renderer {
   readonly app: Application;
   readonly world: Container;
   readonly tex: TextureSet;
-  zoom = 1.0;
+  zoom = 1.4;
   cam: TileCoord = { x: 24, y: 24 };
   selection: Set<number> = new Set();
   selectionBuilding: number | null = null;
@@ -78,7 +78,7 @@ export class Renderer {
   static async create(canvasHost: HTMLElement, sim: World): Promise<Renderer> {
     const app = new Application();
     await app.init({
-      background: '#121a14',
+      background: '#000000',
       resizeTo: window,
       antialias: true,
       autoDensity: true,
@@ -296,7 +296,7 @@ export class Renderer {
     ctx.fillStyle = '#101511';
     ctx.fillRect(0, 0, cw, ch);
 
-    const ver = '?v=t1';
+    const ver = '?v=t2';
     const names = ['grass', 'dirt', 'water', 'rock'] as const;
     let imgs: HTMLImageElement[];
     try {
@@ -525,7 +525,7 @@ export class Renderer {
       for (let x = 0; x < S; x++) {
         if (this.sim.tileVisible(0, x, y)) continue;
         const known = this.sim.tileExplored(0, x, y);
-        g.poly(tileDiamond(x, y)).fill({ color: 0x050806, alpha: known ? 0.58 : 1 });
+        g.poly(tileDiamond(x, y)).fill({ color: 0x000000, alpha: known ? 0.58 : 1 });
       }
     }
   }

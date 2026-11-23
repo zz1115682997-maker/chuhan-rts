@@ -9,6 +9,7 @@ import { sfxOrder, sfxUnlock } from '../ui/sfx.js';
 export interface HudPort {
   toast(msg: string): void;
   refresh(): void;
+  selectTab(key: string): void;
 }
 
 export class Controller {
@@ -157,9 +158,15 @@ export class Controller {
 
     // 鼠标推到窗口边缘就滚屏 —— 绑定在 window 上，鼠标压在 HUD 上时也生效
     window.addEventListener('mousemove', (e) => {
+      const overHud = (e.target as HTMLElement | null)?.closest?.('#hud');
+      if (overHud) {
+        this.edge.x = 0;
+        this.edge.y = 0;
+        return;
+      }
       const w = window.innerWidth;
       const h = window.innerHeight;
-      const M = 44;
+      const M = 18;
       this.edge.x = e.clientX < M ? -1 : e.clientX > w - M ? 1 : 0;
       this.edge.y = e.clientY < M ? -1 : e.clientY > h - M ? 1 : 0;
     });
@@ -200,6 +207,11 @@ export class Controller {
       }
       if (k === 'a') this.attackMode = !this.attackMode;
       if (k === 'f') this.deploySelected();
+      if (k === 'q') this.hud.selectTab('build');
+      if (k === 'w') this.hud.selectTab('works');
+      if (k === 'e') this.hud.selectTab('soldiers');
+      if (k === 'r') this.hud.selectTab('vehicles');
+      if (k === 'h') this.centerBase();
       if (e.key >= '1' && e.key <= '9') {
         const n = Number(e.key);
         if (e.ctrlKey || e.metaKey) {
@@ -466,6 +478,24 @@ export class Controller {
     } else {
       this.world.enqueue({ c: 'move', ids, x: t.x, y: t.y });
     }
+  }
+
+  private centerBase(): void {
+    let x = 10;
+    let y = 10;
+    for (const u of this.world.unitById.values()) {
+      if (u.owner === 0 && u.alive && u.kind === 'mcv') {
+        x = u.x;
+        y = u.y;
+      }
+    }
+    for (const b of this.world.buildingById.values()) {
+      if (b.owner === 0 && b.alive && b.kind === 'daying') {
+        x = b.x;
+        y = b.y;
+      }
+    }
+    this.renderer.centerOn(x, y);
   }
 
   toggleOpMode(): void {

@@ -74,6 +74,12 @@ export class Hud implements HudPort {
   private toastLife = 0;
   private frameCount = 0;
   private activeTab = 'build';
+  private showTab: (key: string) => void = () => {};
+
+  /** 侧栏翻页。键位对齐这台红警的 Keyboard.ini：Q 建筑、W 工事、E 士兵、R 车辆。 */
+  selectTab(key: string): void {
+    this.showTab(key);
+  }
 
   constructor(world: World) {
     this.world = world;
@@ -149,13 +155,14 @@ export class Hud implements HudPort {
     ];
     const tabBtns: Record<string, HTMLElement> = {};
     const panes: Record<string, HTMLElement> = {};
-    const showTab = (key: string): void => {
+    this.showTab = (key: string): void => {
       for (const t of TAB_DEFS) {
         panes[t.key].classList.toggle('active', t.key === key);
         tabBtns[t.key].classList.toggle('active', t.key === key);
       }
       this.activeTab = key;
     };
+    const showTab = this.showTab;
     for (const t of TAB_DEFS) {
       const b = el('button', 'tab', tabsEl);
       b.textContent = t.label;
@@ -355,7 +362,10 @@ export class Hud implements HudPort {
     }
     const sel = [...ctrl.selection];
     if (sel.length === 0) {
-      this.infoEl.innerHTML = '<span class="dim">左键框选 · 右键下令 · 中键或空格+左键拖动地图 · 鼠标推边滚屏 · 小地图可拖动</span>';
+      const order = ctrl.leftClickOrders
+        ? '左键框选或下令 · 右键取消选中，命令继续走'
+        : '左键框选 · 右键下令';
+      this.infoEl.innerHTML = `<span class="dim">${order} · 中键或空格+左键拖动地图 · 鼠标推到屏幕边滚屏 · Q建筑 W工事 E士兵 R车辆 · H回到军旗</span>`;
       return;
     }
     const counts = new Map<string, number>();
